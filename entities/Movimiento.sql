@@ -1,0 +1,72 @@
+{
+  "name": "Movimiento",
+  "type": "object",
+  "properties": {
+    "fecha": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha del movimiento"
+    },
+    "tipo": {
+      "type": "string",
+      "enum": [
+        "RECARGA",
+        "COMPRA",
+        "DESPACHO"
+      ],
+      "description": "Tipo de movimiento"
+    },
+    "tarjeta_id": {
+      "type": "string",
+      "description": "ID de la tarjeta (no aplica en DESPACHO)"
+    },
+    "tarjeta_alias": {
+      "type": "string",
+      "description": "Alias o n\u00famero de tarjeta (referencia r\u00e1pida)"
+    },
+    "monto": {
+      "type": "number",
+      "description": "Monto total del movimiento (no aplica en DESPACHO)"
+    },
+    "vehiculo_chapa": {
+      "type": "string",
+      "description": "Chapa del veh\u00edculo destino (COMPRA y DESPACHO)"
+    },
+    "vehiculo_alias": {
+      "type": "string",
+      "description": "Alias del veh\u00edculo (referencia r\u00e1pida)"
+    },
+    "vehiculo_origen_chapa": {
+      "type": "string",
+      "description": "Chapa del veh\u00edculo origen/reserva (solo DESPACHO)"
+    },
+    "vehiculo_origen_alias": {
+      "type": "string",
+      "description": "Alias del veh\u00edculo origen/reserva (referencia r\u00e1pida)"
+    },
+    "combustible_id": {
+      "type": "string",
+      "description": "ID del tipo de combustible"
+    },
+    "combustible_nombre": {
+      "type": "string",
+      "description": "Nombre del combustible (referencia r\u00e1pida)"
+    },
+    "precio": {
+      "type": "number",
+      "description": "Precio por litro al momento (solo COMPRA)"
+    },
+    "litros": {
+      "type": "number",
+      "description": "Litros (COMPRA y DESPACHO)"
+    },
+    "referencia": {
+      "type": "string",
+      "description": "Nota/factura de referencia"
+    }
+  },
+  "required": [
+    "fecha",
+    "tipo"
+  ]
+}
