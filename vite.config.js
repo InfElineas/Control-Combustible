@@ -24,7 +24,7 @@ export default defineConfig(async () => {
   const base44Plugin = await loadBase44Plugin()
 
   return {
-    logLevel: 'error',
+    logLevel: 'info',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),

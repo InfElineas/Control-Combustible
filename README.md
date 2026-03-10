@@ -60,6 +60,7 @@ Si el navegador muestra `DNS_PROBE_FINISHED_NXDOMAIN` al iniciar sesión, revisa
 2. Que estés editando `.env.local` o `.env` (no solo `.env.example`).
 3. Reiniciar `npm run dev` después de cambiar variables de entorno.
 4. En Supabase Auth > URL Configuration, agregar `http://localhost:5173` como redirect permitido.
+5. Si `npm run dev` parece "congelado", revisa `http://localhost:5173` igualmente: Vite permanece en ejecución a la espera de conexiones.
 
 La app guarda automáticamente el `access_token` devuelto por Supabase en el hash de la URL al volver del login social.
 
