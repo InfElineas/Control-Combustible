@@ -60,14 +60,21 @@ create table if not exists public.movimientos (
   litros numeric(12,3),
   odometro numeric(14,1),
   referencia text,
+  created_by uuid references auth.users(id),
   created_date timestamptz not null default now(),
   constraint chk_movimiento_monto check (monto is null or monto >= 0),
   constraint chk_movimiento_litros check (litros is null or litros >= 0),
   constraint chk_movimiento_precio check (precio is null or precio >= 0)
 );
+
+-- Compatibilidad con instalaciones existentes
+alter table public.movimientos add column if not exists created_by uuid references auth.users(id);
+alter table public.movimientos alter column created_by set default auth.uid();
+
 create index if not exists idx_movimientos_fecha on public.movimientos(fecha desc);
 create index if not exists idx_movimientos_tarjeta on public.movimientos(tarjeta_id);
 create index if not exists idx_movimientos_combustible on public.movimientos(combustible_id);
+create index if not exists idx_movimientos_created_by on public.movimientos(created_by);
 
 -- Vista operativa para dashboard/reportes
 create or replace view public.v_saldos_tarjeta as
@@ -83,38 +90,6 @@ from public.tarjetas t
 left join public.movimientos m on m.tarjeta_id = t.id
 group by t.id, t.id_tarjeta, t.alias, t.moneda, t.saldo_inicial;
 
--- RLS base (idempotente)
-alter table public.combustibles enable row level security;
-alter table public.tarjetas enable row level security;
-alter table public.vehiculos enable row level security;
-alter table public.precios_combustible enable row level security;
-alter table public.movimientos enable row level security;
-
-drop policy if exists "allow authenticated read" on public.combustibles;
-drop policy if exists "allow authenticated write" on public.combustibles;
-create policy "allow authenticated read" on public.combustibles for select to authenticated using (true);
-create policy "allow authenticated write" on public.combustibles for all to authenticated using (true) with check (true);
-
-drop policy if exists "allow authenticated read" on public.tarjetas;
-drop policy if exists "allow authenticated write" on public.tarjetas;
-create policy "allow authenticated read" on public.tarjetas for select to authenticated using (true);
-create policy "allow authenticated write" on public.tarjetas for all to authenticated using (true) with check (true);
-
-drop policy if exists "allow authenticated read" on public.vehiculos;
-drop policy if exists "allow authenticated write" on public.vehiculos;
-create policy "allow authenticated read" on public.vehiculos for select to authenticated using (true);
-create policy "allow authenticated write" on public.vehiculos for all to authenticated using (true) with check (true);
-
-drop policy if exists "allow authenticated read" on public.precios_combustible;
-drop policy if exists "allow authenticated write" on public.precios_combustible;
-create policy "allow authenticated read" on public.precios_combustible for select to authenticated using (true);
-create policy "allow authenticated write" on public.precios_combustible for all to authenticated using (true) with check (true);
-
-drop policy if exists "allow authenticated read" on public.movimientos;
-drop policy if exists "allow authenticated write" on public.movimientos;
-create policy "allow authenticated read" on public.movimientos for select to authenticated using (true);
-create policy "allow authenticated write" on public.movimientos for all to authenticated using (true) with check (true);
-
 -- Roles de usuario (RBAC)
 create table if not exists public.perfiles (
   id uuid primary key default gen_random_uuid(),
@@ -124,29 +99,105 @@ create table if not exists public.perfiles (
   created_date timestamptz not null default now()
 );
 
+alter table public.combustibles enable row level security;
+alter table public.tarjetas enable row level security;
+alter table public.vehiculos enable row level security;
+alter table public.precios_combustible enable row level security;
+alter table public.movimientos enable row level security;
 alter table public.perfiles enable row level security;
 
-drop policy if exists "perfil own read" on public.perfiles;
-create policy "perfil own read" on public.perfiles
-for select to authenticated
-using (auth.uid() = user_id);
+-- Helpers RBAC
+create or replace function public.current_user_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select p.role from public.perfiles p where p.user_id = auth.uid()), 'operador');
+$$;
 
-drop policy if exists "perfil superadmin manage" on public.perfiles;
-create policy "perfil superadmin manage" on public.perfiles
+create or replace function public.is_admin_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.current_user_role() in ('admin', 'superadmin');
+$$;
+
+create or replace function public.is_superadmin_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.current_user_role() = 'superadmin';
+$$;
+
+-- Policies idempotentes
+-- combustibles
+drop policy if exists "combustibles read authenticated" on public.combustibles;
+drop policy if exists "combustibles write admin" on public.combustibles;
+create policy "combustibles read authenticated" on public.combustibles
+for select to authenticated using (true);
+create policy "combustibles write admin" on public.combustibles
+for all to authenticated using (public.is_admin_user()) with check (public.is_admin_user());
+
+-- tarjetas
+drop policy if exists "tarjetas read authenticated" on public.tarjetas;
+drop policy if exists "tarjetas write admin" on public.tarjetas;
+create policy "tarjetas read authenticated" on public.tarjetas
+for select to authenticated using (true);
+create policy "tarjetas write admin" on public.tarjetas
+for all to authenticated using (public.is_admin_user()) with check (public.is_admin_user());
+
+-- vehiculos
+drop policy if exists "vehiculos read authenticated" on public.vehiculos;
+drop policy if exists "vehiculos write admin" on public.vehiculos;
+create policy "vehiculos read authenticated" on public.vehiculos
+for select to authenticated using (true);
+create policy "vehiculos write admin" on public.vehiculos
+for all to authenticated using (public.is_admin_user()) with check (public.is_admin_user());
+
+-- precios
+drop policy if exists "precios read authenticated" on public.precios_combustible;
+drop policy if exists "precios write admin" on public.precios_combustible;
+create policy "precios read authenticated" on public.precios_combustible
+for select to authenticated using (true);
+create policy "precios write admin" on public.precios_combustible
+for all to authenticated using (public.is_admin_user()) with check (public.is_admin_user());
+
+-- movimientos
+drop policy if exists "movimientos read authenticated" on public.movimientos;
+drop policy if exists "movimientos insert authenticated" on public.movimientos;
+drop policy if exists "movimientos update admin" on public.movimientos;
+drop policy if exists "movimientos delete admin" on public.movimientos;
+create policy "movimientos read authenticated" on public.movimientos
+for select to authenticated using (true);
+create policy "movimientos insert authenticated" on public.movimientos
+for insert to authenticated with check (auth.uid() is not null);
+create policy "movimientos update admin" on public.movimientos
+for update to authenticated using (public.is_admin_user()) with check (public.is_admin_user());
+create policy "movimientos delete admin" on public.movimientos
+for delete to authenticated using (public.is_admin_user());
+
+-- perfiles
+drop policy if exists "perfiles own read" on public.perfiles;
+drop policy if exists "perfiles admin read" on public.perfiles;
+drop policy if exists "perfiles superadmin manage" on public.perfiles;
+create policy "perfiles own read" on public.perfiles
+for select to authenticated using (auth.uid() = user_id);
+create policy "perfiles admin read" on public.perfiles
+for select to authenticated using (public.is_admin_user());
+create policy "perfiles superadmin manage" on public.perfiles
 for all to authenticated
-using (
-  exists (
-    select 1 from public.perfiles p
-    where p.user_id = auth.uid() and p.role = 'superadmin'
-  )
-)
-with check (
-  exists (
-    select 1 from public.perfiles p
-    where p.user_id = auth.uid() and p.role = 'superadmin'
-  )
-);
+using (public.is_superadmin_user())
+with check (public.is_superadmin_user());
 
+-- Alta automática de perfil al crear usuario auth
 create or replace function public.handle_new_user_profile()
 returns trigger
 language plpgsql
@@ -173,7 +224,7 @@ from auth.users u
 left join public.perfiles p on p.user_id = u.id
 where p.user_id is null;
 
--- Bootstrap: si no hay superadmin, promueve el usuario por email
+-- Bootstrap: crea primer superadmin por email (solo si no existe ninguno)
 create or replace function public.promote_superadmin_by_email(target_email text)
 returns void
 language plpgsql
@@ -202,7 +253,5 @@ begin
 end;
 $$;
 
--- Uso recomendado inicial (solo una vez):
+-- Uso inicial:
 -- select public.promote_superadmin_by_email('tu_email@dominio.com');
--- Luego podrás gestionar roles con:
--- update public.perfiles set role = 'admin' where user_id = '<UUID_DEL_USUARIO>';

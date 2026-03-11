@@ -53,9 +53,15 @@ export default function Login() {
           <p className="text-sm text-slate-500">Sistema de autenticación</p>
         </CardHeader>
         <CardContent className="space-y-4">
-          {authError?.message && (
+          {authError?.message && authError?.type !== 'auth_required' && (
             <div className="text-xs rounded-md bg-amber-50 border border-amber-200 text-amber-700 px-3 py-2">
               {authError.message}
+            </div>
+          )}
+
+          {isSupabaseEnabled && (
+            <div className="text-xs rounded-md bg-sky-50 border border-sky-200 text-sky-700 px-3 py-2">
+              Inicia sesión para continuar. Si es tu primera vez, crea una cuenta en la pestaña Registro.
             </div>
           )}
 
