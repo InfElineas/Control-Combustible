@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 export default function Login() {
   const { navigateToLogin, authError, signInWithPassword, signUpWithPassword, checkAppState, isSupabaseEnabled } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState('login');
+  const [registerFeedback, setRegisterFeedback] = useState(null);
   const [login, setLogin] = useState({ email: '', password: '' });
   const [register, setRegister] = useState({ fullName: '', email: '', password: '' });
 
@@ -28,19 +30,27 @@ export default function Login() {
 
   const submitRegister = async () => {
     setIsSubmitting(true);
+    setRegisterFeedback(null);
     try {
       const response = await signUpWithPassword(register);
-      if (response?.access_token || response?.session?.access_token) {
+      const hasSession = Boolean(response?.access_token || response?.session?.access_token);
+
+      if (hasSession) {
         toast.success('Cuenta creada e inicio de sesión realizado.');
+        setRegisterFeedback({ type: 'success', message: 'Cuenta creada e inicio de sesión realizado.' });
       } else {
-        toast.success('Cuenta creada. Revisa tu correo para confirmar el acceso si aplica.');
+        const message = 'Cuenta creada correctamente. Ahora inicia sesión con tu correo y contraseña.';
+        toast.success(message);
+        setRegisterFeedback({ type: 'success', message });
+        setActiveTab('login');
       }
     } catch (error) {
       const message = error?.message || 'No se pudo crear la cuenta';
       const signupHint = message.includes('status 422')
-        ? 'Verifica si Signups está habilitado en Supabase Auth y que el correo no exista ya.'
+        ? 'No se pudo crear la cuenta (422). Verifica que Signups esté habilitado en Supabase Auth o si el correo ya existe.'
         : message;
       toast.error(signupHint);
+      setRegisterFeedback({ type: 'error', message: signupHint });
     } finally {
       setIsSubmitting(false);
     }
@@ -73,9 +83,15 @@ export default function Login() {
             </div>
           )}
 
+          {registerFeedback && (
+            <div className={`text-xs rounded-md px-3 py-2 border ${registerFeedback.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+              {registerFeedback.message}
+            </div>
+          )}
+
           {isSupabaseEnabled ? (
             <>
-              <Tabs defaultValue="login" className="w-full">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid grid-cols-2 w-full">
                   <TabsTrigger value="login">Entrar</TabsTrigger>
                   <TabsTrigger value="register">Registro</TabsTrigger>
