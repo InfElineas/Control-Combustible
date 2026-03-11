@@ -1,4 +1,4 @@
-import { appEnv, isSupabaseConfigured } from '@/config/env';
+import { appEnv, isSupabaseConfigured, isSupabaseMode, supabaseConfigIssue } from '@/config/env';
 import { createLocalRepository } from '@/api/repositories/localRepository';
 import { createSupabaseRepository } from '@/api/repositories/supabaseRepository';
 
@@ -21,7 +21,7 @@ function isValidSupabaseUrl(url) {
 }
 
 const normalizedSupabaseUrl = normalizeUrl(appEnv.supabaseUrl);
-const useSupabase = appEnv.dataMode === 'supabase' && isSupabaseConfigured && isValidSupabaseUrl(normalizedSupabaseUrl);
+const useSupabase = isSupabaseMode && isSupabaseConfigured && isValidSupabaseUrl(normalizedSupabaseUrl);
 
 function createEntity(tableName) {
   return useSupabase ? createSupabaseRepository(tableName, getAccessToken, AUTH_TOKEN_KEY) : createLocalRepository(tableName);
@@ -102,12 +102,22 @@ async function requestAuth(path, options = {}) {
   return payload;
 }
 
+function ensureSupabaseReady() {
+  if (useSupabase) return;
+  if (isSupabaseMode) {
+    throw new Error(supabaseConfigIssue || 'Configuración de Supabase incompleta en .env.local');
+  }
+}
+
 export const base44 = {
   entities: Object.fromEntries(Object.entries(ENTITY_MAP).map(([name, table]) => [name, createEntity(table)])),
   auth: {
     isSupabaseEnabled: useSupabase,
+    isSupabaseMode,
+    supabaseConfigIssue,
     async me() {
       if (!useSupabase) {
+        ensureSupabaseReady();
         return { id: 'local-user', role: 'admin', full_name: 'Administrador' };
       }
 
@@ -144,6 +154,7 @@ export const base44 = {
     },
     async signInWithPassword({ email, password }) {
       if (!useSupabase) {
+        ensureSupabaseReady();
         return { id: 'local-user', email: 'local@fuel.flow', role: 'admin', full_name: 'Administrador' };
       }
 
@@ -159,6 +170,7 @@ export const base44 = {
     },
     async signUpWithPassword({ email, password, fullName }) {
       if (!useSupabase) {
+        ensureSupabaseReady();
         return { user: { id: 'local-user', email }, session: { access_token: 'local-token' } };
       }
 
@@ -182,7 +194,10 @@ export const base44 = {
       return data;
     },
     async logout() {
-      if (!useSupabase) return;
+      if (!useSupabase) {
+        ensureSupabaseReady();
+        return;
+      }
       const token = getAccessToken();
       if (token) {
         await fetch(`${normalizedSupabaseUrl}/auth/v1/logout`, {
@@ -196,7 +211,10 @@ export const base44 = {
       localStorage.removeItem(AUTH_TOKEN_KEY);
     },
     redirectToLogin(redirectTo = window.location.href) {
-      if (!useSupabase) return;
+      if (!useSupabase) {
+        ensureSupabaseReady();
+        return;
+      }
 
       if (!isValidSupabaseUrl(normalizedSupabaseUrl)) {
         throw new Error('VITE_SUPABASE_URL inválida. Usa el dominio real de tu proyecto: https://<project-ref>.supabase.co');

@@ -84,6 +84,54 @@ VITE_ENABLE_BASE44_PLUGIN=true
 Si `VITE_DATA_MODE=supabase` pero no hay sesión activa en localhost, la app entra en fallback local para que puedas abrirla y seguir trabajando sin bloqueo de login.
 
 
+
+## Conectar Supabase desde VS Code (CLI + migrations)
+
+> Requisito: tener instalado Supabase CLI (`supabase --version`).
+
+1. Login en Supabase CLI:
+
+```bash
+supabase login
+```
+
+2. Inicializar el proyecto (si aún no existe `supabase/config.toml`):
+
+```bash
+supabase init
+```
+
+3. Vincular el repo con tu proyecto remoto (usa tu `project-ref` de Supabase):
+
+```bash
+supabase link --project-ref <project-ref>
+```
+
+4. Aplicar migraciones locales al proyecto remoto:
+
+```bash
+supabase db push
+```
+
+5. Si necesitas traer cambios remotos como baseline local:
+
+```bash
+supabase db pull
+```
+
+6. Crear nuevas migraciones a partir de ahora:
+
+```bash
+supabase migration new <nombre_migracion>
+```
+
+Este repo ya incluye una primera migración base en `supabase/migrations/20260311160000_init_schema.sql`.
+
+## Tablas de usuarios y roles en Supabase
+
+- **Usuarios**: Supabase Auth guarda usuarios en `auth.users` (schema `auth`).
+- **Roles de la app**: se guardan en `public.perfiles` con `role in ('operador','admin','superadmin')`.
+
 ## Roles de usuarios en Supabase
 
 El sistema ahora usa la tabla `public.perfiles` para roles (`operador`, `admin`, `superadmin`).

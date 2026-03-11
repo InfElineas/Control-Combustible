@@ -9,7 +9,16 @@ import { Fuel, Loader2, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Login() {
-  const { navigateToLogin, authError, signInWithPassword, signUpWithPassword, checkAppState, isSupabaseEnabled } = useAuth();
+  const {
+    navigateToLogin,
+    authError,
+    signInWithPassword,
+    signUpWithPassword,
+    checkAppState,
+    isSupabaseEnabled,
+    isSupabaseMode,
+    supabaseConfigIssue,
+  } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState('login');
   const [registerFeedback, setRegisterFeedback] = useState(null);
@@ -56,7 +65,7 @@ export default function Login() {
     }
   };
 
-  const continueLocal = async () => {
+  const retryConfigCheck = async () => {
     await checkAppState();
   };
 
@@ -89,7 +98,7 @@ export default function Login() {
             </div>
           )}
 
-          {isSupabaseEnabled ? (
+          {isSupabaseEnabled && (
             <>
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid grid-cols-2 w-full">
@@ -139,14 +148,27 @@ export default function Login() {
                 <LogIn className="w-4 h-4 mr-2" /> Continuar con Google
               </Button>
             </>
-          ) : (
-            <Button className="w-full" onClick={continueLocal}>
+          )}
+
+          {!isSupabaseEnabled && isSupabaseMode && (
+            <div className="space-y-3">
+              <div className="text-xs rounded-md bg-amber-50 border border-amber-200 text-amber-700 px-3 py-2">
+                {supabaseConfigIssue || 'Configuración incompleta de Supabase. Revisa .env.local y reinicia npm run dev.'}
+              </div>
+              <Button variant="outline" className="w-full" onClick={retryConfigCheck}>
+                Reintentar configuración
+              </Button>
+            </div>
+          )}
+
+          {!isSupabaseMode && (
+            <Button className="w-full" onClick={retryConfigCheck}>
               Entrar en modo local
             </Button>
           )}
 
           <p className="text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
-            <Fuel className="w-3 h-3" /> {isSupabaseEnabled ? 'Auth con Supabase' : 'Autenticación local activa'}
+            <Fuel className="w-3 h-3" /> {isSupabaseEnabled ? 'Auth con Supabase' : isSupabaseMode ? 'Supabase no configurado aún' : 'Autenticación local activa'}
           </p>
         </CardContent>
       </Card>

@@ -90,6 +90,8 @@ export const AuthProvider = ({ children }) => {
         authError,
         appPublicSettings,
         isSupabaseEnabled: base44.auth.isSupabaseEnabled,
+        isSupabaseMode: base44.auth.isSupabaseMode,
+        supabaseConfigIssue: base44.auth.supabaseConfigIssue,
         signInWithPassword,
         signUpWithPassword,
         logout,
