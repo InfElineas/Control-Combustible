@@ -66,6 +66,24 @@ async function fetchUserProfile(userId, token) {
   return rows?.[0] || null;
 }
 
+
+async function fetchCurrentUserRole(token) {
+  const response = await fetch(`${normalizedSupabaseUrl}/rest/v1/rpc/current_user_role`, {
+    method: 'POST',
+    headers: {
+      apikey: appEnv.supabaseAnonKey,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) return null;
+
+  const payload = await response.json().catch(() => null);
+  return typeof payload === 'string' ? payload : null;
+}
+
 async function requestAuth(path, options = {}) {
   const response = await fetch(`${normalizedSupabaseUrl}${path}`, {
     ...options,
@@ -115,12 +133,13 @@ export const base44 = {
 
       const user = await response.json();
       const profile = await fetchUserProfile(user.id, token);
+      const resolvedRole = profile?.role || await fetchCurrentUserRole(token) || user.user_metadata?.role || 'operador';
 
       return {
         id: user.id,
         email: user.email,
         full_name: profile?.full_name || user.user_metadata?.full_name || user.email,
-        role: profile?.role || user.user_metadata?.role || 'operador',
+        role: resolvedRole,
       };
     },
     async signInWithPassword({ email, password }) {

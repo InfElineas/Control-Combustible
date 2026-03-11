@@ -104,7 +104,15 @@ join auth.users u on u.id = p.user_id
 order by p.created_date desc;
 ```
 
-4. Cambia roles manualmente cuando ya exista superadmin:
+4. Si hay dudas con el correo exacto (ej. `informaticoelineas...` vs `informaticoelienas...`), busca primero el email real:
+
+```sql
+select id, email
+from auth.users
+where lower(email) like '%informatico%';
+```
+
+5. Cambia roles manualmente cuando ya exista superadmin:
 
 ```sql
 update public.perfiles
