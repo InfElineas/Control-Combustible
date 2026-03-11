@@ -88,29 +88,28 @@ Si `VITE_DATA_MODE=supabase` pero no hay sesión activa en localhost, la app ent
 
 El sistema ahora usa la tabla `public.perfiles` para roles (`operador`, `admin`, `superadmin`).
 
-1. Ejecuta de nuevo `supabase/schema.sql` para crear `public.perfiles` y el trigger de alta automática.
-2. Registra/inicia sesión con el usuario que quieras promover.
-3. En Supabase SQL Editor, busca su UUID:
+1. Ejecuta de nuevo `supabase/schema.sql` para crear `public.perfiles`, trigger y backfill.
+2. Si aún no tienes superadmin, promueve el primer usuario por email:
 
 ```sql
-select id, email from auth.users order by created_at desc;
+select public.promote_superadmin_by_email('tu_email@dominio.com');
 ```
 
-4. Promuévelo a superadmin:
-
-```sql
-update public.perfiles
-set role = 'superadmin'
-where user_id = '<UUID_DEL_USUARIO>';
-```
-
-5. Verifica roles:
+3. Verifica roles:
 
 ```sql
 select p.role, u.email
 from public.perfiles p
 join auth.users u on u.id = p.user_id
 order by p.created_date desc;
+```
+
+4. Cambia roles manualmente cuando ya exista superadmin:
+
+```sql
+update public.perfiles
+set role = 'admin'
+where user_id = '<UUID_DEL_USUARIO>';
 ```
 
 > Nota: `base44.auth.me()` prioriza el rol en `public.perfiles`; si no existe perfil, usa `user_metadata` como fallback.

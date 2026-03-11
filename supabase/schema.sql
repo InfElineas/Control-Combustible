@@ -83,25 +83,35 @@ from public.tarjetas t
 left join public.movimientos m on m.tarjeta_id = t.id
 group by t.id, t.id_tarjeta, t.alias, t.moneda, t.saldo_inicial;
 
--- RLS base (ajustar según estrategia de usuarios/roles)
+-- RLS base (idempotente)
 alter table public.combustibles enable row level security;
 alter table public.tarjetas enable row level security;
 alter table public.vehiculos enable row level security;
 alter table public.precios_combustible enable row level security;
 alter table public.movimientos enable row level security;
 
+drop policy if exists "allow authenticated read" on public.combustibles;
+drop policy if exists "allow authenticated write" on public.combustibles;
 create policy "allow authenticated read" on public.combustibles for select to authenticated using (true);
 create policy "allow authenticated write" on public.combustibles for all to authenticated using (true) with check (true);
 
+drop policy if exists "allow authenticated read" on public.tarjetas;
+drop policy if exists "allow authenticated write" on public.tarjetas;
 create policy "allow authenticated read" on public.tarjetas for select to authenticated using (true);
 create policy "allow authenticated write" on public.tarjetas for all to authenticated using (true) with check (true);
 
+drop policy if exists "allow authenticated read" on public.vehiculos;
+drop policy if exists "allow authenticated write" on public.vehiculos;
 create policy "allow authenticated read" on public.vehiculos for select to authenticated using (true);
 create policy "allow authenticated write" on public.vehiculos for all to authenticated using (true) with check (true);
 
+drop policy if exists "allow authenticated read" on public.precios_combustible;
+drop policy if exists "allow authenticated write" on public.precios_combustible;
 create policy "allow authenticated read" on public.precios_combustible for select to authenticated using (true);
 create policy "allow authenticated write" on public.precios_combustible for all to authenticated using (true) with check (true);
 
+drop policy if exists "allow authenticated read" on public.movimientos;
+drop policy if exists "allow authenticated write" on public.movimientos;
 create policy "allow authenticated read" on public.movimientos for select to authenticated using (true);
 create policy "allow authenticated write" on public.movimientos for all to authenticated using (true) with check (true);
 
@@ -116,11 +126,12 @@ create table if not exists public.perfiles (
 
 alter table public.perfiles enable row level security;
 
+drop policy if exists "perfil own read" on public.perfiles;
 create policy "perfil own read" on public.perfiles
 for select to authenticated
 using (auth.uid() = user_id);
 
--- Solo superadmin puede gestionar roles (ejecución vía SQL editor como postgres también aplica)
+drop policy if exists "perfil superadmin manage" on public.perfiles;
 create policy "perfil superadmin manage" on public.perfiles
 for all to authenticated
 using (
@@ -155,5 +166,43 @@ create trigger on_auth_user_created
 after insert on auth.users
 for each row execute procedure public.handle_new_user_profile();
 
--- Promover un usuario a superadmin (ejecutar en SQL Editor):
--- update public.perfiles set role = 'superadmin' where user_id = '<UUID_DEL_USUARIO>';
+-- Backfill para usuarios creados antes del trigger
+insert into public.perfiles (user_id, full_name, role)
+select u.id, coalesce(u.raw_user_meta_data->>'full_name', u.email), 'operador'
+from auth.users u
+left join public.perfiles p on p.user_id = u.id
+where p.user_id is null;
+
+-- Bootstrap: si no hay superadmin, promueve el usuario por email
+create or replace function public.promote_superadmin_by_email(target_email text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_user_id uuid;
+  superadmins_count int;
+begin
+  select count(*) into superadmins_count from public.perfiles where role = 'superadmin';
+
+  if superadmins_count > 0 then
+    raise exception 'Ya existe al menos un superadmin.';
+  end if;
+
+  select id into target_user_id from auth.users where lower(email) = lower(target_email) limit 1;
+
+  if target_user_id is null then
+    raise exception 'No existe usuario con email %', target_email;
+  end if;
+
+  update public.perfiles
+  set role = 'superadmin'
+  where user_id = target_user_id;
+end;
+$$;
+
+-- Uso recomendado inicial (solo una vez):
+-- select public.promote_superadmin_by_email('tu_email@dominio.com');
+-- Luego podrás gestionar roles con:
+-- update public.perfiles set role = 'admin' where user_id = '<UUID_DEL_USUARIO>';
