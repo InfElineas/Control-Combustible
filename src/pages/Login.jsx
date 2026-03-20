@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/lib/AuthContext';
-import { Fuel, Loader2, LogIn } from 'lucide-react';
+import { Eye, EyeOff, Fuel, Loader2, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Login() {
@@ -24,6 +24,11 @@ export default function Login() {
   const [registerFeedback, setRegisterFeedback] = useState(null);
   const [login, setLogin] = useState({ email: '', password: '' });
   const [register, setRegister] = useState({ fullName: '', email: '', password: '' });
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const isGoogleOAuthAvailable =
+    isSupabaseEnabled
+    && String(import.meta.env.VITE_ENABLE_GOOGLE_OAUTH || 'false').toLowerCase() === 'true';
 
   const submitLogin = async () => {
     setIsSubmitting(true);
@@ -31,7 +36,11 @@ export default function Login() {
       await signInWithPassword(login);
       toast.success('Sesión iniciada correctamente');
     } catch (error) {
-      toast.error(error?.message || 'No se pudo iniciar sesión');
+      const message = error?.message || 'No se pudo iniciar sesión';
+      const hint = message.toLowerCase().includes('email not confirmed')
+        ? 'Tu correo aún no está confirmado. Revisa tu bandeja y confirma el email antes de iniciar sesión.'
+        : message;
+      toast.error(hint);
     } finally {
       setIsSubmitting(false);
     }
@@ -48,7 +57,9 @@ export default function Login() {
         toast.success('Cuenta creada e inicio de sesión realizado.');
         setRegisterFeedback({ type: 'success', message: 'Cuenta creada e inicio de sesión realizado.' });
       } else {
-        const message = 'Cuenta creada correctamente. Ahora inicia sesión con tu correo y contraseña.';
+        const message = isSupabaseEnabled
+          ? 'Cuenta creada. Revisa tu correo para confirmar la cuenta y luego inicia sesión.'
+          : 'Cuenta creada correctamente. Ahora inicia sesión con tu correo y contraseña.';
         toast.success(message);
         setRegisterFeedback({ type: 'success', message });
         setActiveTab('login');
@@ -119,7 +130,22 @@ export default function Login() {
                   </div>
                   <div>
                     <Label className="text-xs text-slate-500">Contraseña</Label>
-                    <Input type="password" className="mt-1" value={login.password} onChange={(e) => setLogin((s) => ({ ...s, password: e.target.value }))} />
+                    <div className="relative mt-1">
+                      <Input
+                        type={showLoginPassword ? 'text' : 'password'}
+                        className="pr-10"
+                        value={login.password}
+                        onChange={(e) => setLogin((s) => ({ ...s, password: e.target.value }))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword((v) => !v)}
+                        className="absolute inset-y-0 right-0 px-3 text-slate-500 hover:text-slate-700"
+                        aria-label={showLoginPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      >
+                        {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <Button className="w-full" onClick={submitLogin} disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogIn className="w-4 h-4 mr-2" />} Iniciar sesión
@@ -137,7 +163,22 @@ export default function Login() {
                   </div>
                   <div>
                     <Label className="text-xs text-slate-500">Contraseña</Label>
-                    <Input type="password" className="mt-1" value={register.password} onChange={(e) => setRegister((s) => ({ ...s, password: e.target.value }))} />
+                    <div className="relative mt-1">
+                      <Input
+                        type={showRegisterPassword ? 'text' : 'password'}
+                        className="pr-10"
+                        value={register.password}
+                        onChange={(e) => setRegister((s) => ({ ...s, password: e.target.value }))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegisterPassword((v) => !v)}
+                        className="absolute inset-y-0 right-0 px-3 text-slate-500 hover:text-slate-700"
+                        aria-label={showRegisterPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      >
+                        {showRegisterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                   <Button className="w-full" onClick={submitRegister} disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogIn className="w-4 h-4 mr-2" />} Crear cuenta
@@ -145,7 +186,7 @@ export default function Login() {
                 </TabsContent>
               </Tabs>
 
-              {isSupabaseEnabled && (
+              {isGoogleOAuthAvailable && (
                 <>
                   <div className="relative my-2">
                     <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-slate-200" /></div>
@@ -156,6 +197,13 @@ export default function Login() {
                     <LogIn className="w-4 h-4 mr-2" /> Continuar con Google
                   </Button>
                 </>
+              )}
+
+              {isSupabaseEnabled && !isGoogleOAuthAvailable && (
+                <div className="text-[11px] text-slate-500 text-center">
+                  Google OAuth desactivado. Para habilitarlo activa el proveedor Google en Supabase y define
+                  {' '}<code>VITE_ENABLE_GOOGLE_OAUTH=true</code>.
+                </div>
               )}
             </>
           )}

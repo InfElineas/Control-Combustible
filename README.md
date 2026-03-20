@@ -64,6 +64,14 @@ Si el navegador muestra `DNS_PROBE_FINISHED_NXDOMAIN` al iniciar sesión, revisa
 
 La app guarda automáticamente el `access_token` devuelto por Supabase en el hash de la URL al volver del login social.
 
+Si quieres mostrar el botón “Continuar con Google” en la UI, configura:
+
+```bash
+VITE_ENABLE_GOOGLE_OAUTH=true
+```
+
+y habilita el proveedor Google en Supabase Auth > Providers.
+
 
 ## Nota plugin Base44
 
