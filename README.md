@@ -72,7 +72,7 @@ VITE_ENABLE_GOOGLE_OAUTH=true
 
 y habilita el proveedor Google en Supabase Auth > Providers.
 
-En el formulario de login puedes seleccionar rol de trabajo (`gestor` o `auditor`); `superadmin` no se expone como opción en la UI.
+En el formulario de registro puedes seleccionar rol (`gestor` o `auditor`); `superadmin` no se expone como opción en la UI.
 
 
 ## Nota plugin Base44

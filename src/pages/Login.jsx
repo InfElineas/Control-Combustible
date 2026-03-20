@@ -24,7 +24,7 @@ export default function Login() {
   const [registerFeedback, setRegisterFeedback] = useState(null);
   const [login, setLogin] = useState({ email: '', password: '' });
   const [register, setRegister] = useState({ fullName: '', email: '', password: '' });
-  const [selectedRole, setSelectedRole] = useState('gestor');
+  const [registerRole, setRegisterRole] = useState('auditor');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const isGoogleOAuthAvailable =
@@ -51,7 +51,7 @@ export default function Login() {
     setIsSubmitting(true);
     setRegisterFeedback(null);
     try {
-      const response = await signUpWithPassword(register);
+      const response = await signUpWithPassword({ ...register, role: registerRole });
       const hasSession = Boolean(response?.access_token || response?.session?.access_token);
 
       if (hasSession) {
@@ -148,20 +148,6 @@ export default function Login() {
                       </button>
                     </div>
                   </div>
-                  <div>
-                    <Label className="text-xs text-slate-500">Rol de trabajo</Label>
-                    <select
-                      className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      value={selectedRole}
-                      onChange={(e) => setSelectedRole(e.target.value)}
-                    >
-                      <option value="gestor">Gestor</option>
-                      <option value="auditor">Auditor</option>
-                    </select>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      El rol superadmin no se puede seleccionar desde este formulario.
-                    </p>
-                  </div>
                   <Button className="w-full" onClick={submitLogin} disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogIn className="w-4 h-4 mr-2" />} Iniciar sesión
                   </Button>
@@ -194,6 +180,20 @@ export default function Login() {
                         {showRegisterPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-500">Rol para la nueva cuenta</Label>
+                    <select
+                      className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      value={registerRole}
+                      onChange={(e) => setRegisterRole(e.target.value)}
+                    >
+                      <option value="auditor">Auditor</option>
+                      <option value="gestor">Gestor</option>
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      El rol superadmin no se puede seleccionar en el registro.
+                    </p>
                   </div>
                   <Button className="w-full" onClick={submitRegister} disabled={isSubmitting}>
                     {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogIn className="w-4 h-4 mr-2" />} Crear cuenta

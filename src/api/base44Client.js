@@ -307,11 +307,12 @@ export const base44 = {
       }
       return data;
     },
-    async signUpWithPassword({ email, password, fullName }) {
+    async signUpWithPassword({ email, password, fullName, role }) {
       if (!useSupabase) {
         ensureSupabaseReady();
         const normalizedEmail = String(email || '').trim().toLowerCase();
         const normalizedPassword = String(password || '').trim();
+        const normalizedRole = ['auditor', 'gestor'].includes(role) ? role : 'auditor';
         if (!normalizedEmail || !normalizedPassword) {
           throw new Error('Correo y contraseña son obligatorios.');
         }
@@ -321,12 +322,11 @@ export const base44 = {
           throw new Error('Ese correo ya está registrado en modo local.');
         }
 
-        const role = users.length === 0 ? 'superadmin' : 'auditor';
         const createdUser = createLocalUser({
           email: normalizedEmail,
           password: normalizedPassword,
           fullName,
-          role,
+          role: normalizedRole,
         });
         writeLocalUsers([...users, createdUser]);
         saveLocalSession(createdUser.id);
@@ -338,11 +338,12 @@ export const base44 = {
         body: JSON.stringify({
           email,
           password,
-          data: {
-            full_name: fullName || email,
-          },
-        }),
-      });
+              data: {
+                full_name: fullName || email,
+                role: ['auditor', 'gestor'].includes(role) ? role : 'auditor',
+              },
+            }),
+          });
 
       if (data?.access_token) {
         safeLocalStorageSet(AUTH_TOKEN_KEY, data.access_token);
