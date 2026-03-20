@@ -64,6 +64,16 @@ Si el navegador muestra `DNS_PROBE_FINISHED_NXDOMAIN` al iniciar sesión, revisa
 
 La app guarda automáticamente el `access_token` devuelto por Supabase en el hash de la URL al volver del login social.
 
+Si quieres mostrar el botón “Continuar con Google” en la UI, configura:
+
+```bash
+VITE_ENABLE_GOOGLE_OAUTH=true
+```
+
+y habilita el proveedor Google en Supabase Auth > Providers.
+
+En el formulario de login puedes seleccionar rol de trabajo (`gestor` o `auditor`); `superadmin` no se expone como opción en la UI.
+
 
 ## Nota plugin Base44
 
@@ -116,6 +126,8 @@ supabase link --project-ref <project-ref>
 ```bash
 supabase db push
 ```
+
+> Incluye la migración de promoción solicitada para `julio.jasan` a `superadmin` (`20260320123000_promote_julio_jasan_superadmin.sql`).
 
 5. Si necesitas traer cambios remotos como baseline local:
 

@@ -60,7 +60,8 @@ export const AuthProvider = ({ children }) => {
     };
   }, [checkAppState]);
 
-  const signInWithPassword = async (credentials) => {
+  const signInWithPassword = async (credentials, role) => {
+    base44.auth.setActiveRole(role);
     await base44.auth.signInWithPassword(credentials);
     await checkAppState();
   };
@@ -76,6 +77,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setUser(null);
     setIsAuthenticated(false);
+    base44.auth.clearActiveRole();
     await base44.auth.logout();
   };
 

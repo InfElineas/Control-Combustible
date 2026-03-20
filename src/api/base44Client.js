@@ -13,6 +13,7 @@ const ENTITY_MAP = {
 const AUTH_TOKEN_KEY = 'ff_supabase_access_token';
 const LOCAL_USERS_KEY = 'ff_local_users';
 const LOCAL_SESSION_KEY = 'ff_local_session_user_id';
+const ACTIVE_ROLE_KEY = 'ff_active_role';
 
 function normalizeUrl(url) {
   return String(url || '').trim().replace(/\/+$/, '');
@@ -85,6 +86,27 @@ function saveLocalSession(userId) {
 function clearLocalSession() {
   safeLocalStorageRemove(LOCAL_SESSION_KEY);
   safeLocalStorageRemove(AUTH_TOKEN_KEY);
+}
+
+function getRequestedRole() {
+  const role = safeLocalStorageGet(ACTIVE_ROLE_KEY);
+  return ['gestor', 'auditor'].includes(role) ? role : null;
+}
+
+function setRequestedRole(role) {
+  if (!['gestor', 'auditor'].includes(role)) {
+    safeLocalStorageRemove(ACTIVE_ROLE_KEY);
+    return;
+  }
+  safeLocalStorageSet(ACTIVE_ROLE_KEY, role);
+}
+
+function resolveActingRole(actualRole) {
+  const requestedRole = getRequestedRole();
+  if (!requestedRole) return actualRole;
+  if (actualRole === 'superadmin') return requestedRole;
+  if (actualRole === 'gestor' && requestedRole === 'auditor') return 'auditor';
+  return actualRole;
 }
 
 const normalizedSupabaseUrl = normalizeUrl(appEnv.supabaseUrl);
@@ -227,7 +249,7 @@ export const base44 = {
           id: user.id,
           email: user.email,
           full_name: user.full_name,
-          role: user.role || 'auditor',
+          role: resolveActingRole(user.role || 'auditor'),
         };
       }
 
@@ -259,7 +281,7 @@ export const base44 = {
         id: user.id,
         email: user.email,
         full_name: profile?.full_name || user.user_metadata?.full_name || user.email,
-        role: resolvedRole,
+        role: resolveActingRole(resolvedRole),
       };
     },
     async signInWithPassword({ email, password }) {
@@ -334,6 +356,7 @@ export const base44 = {
       if (!useSupabase) {
         ensureSupabaseReady();
         clearLocalSession();
+        setRequestedRole(null);
         return;
       }
       const token = getAccessToken();
@@ -347,6 +370,13 @@ export const base44 = {
         });
       }
       safeLocalStorageRemove(AUTH_TOKEN_KEY);
+      setRequestedRole(null);
+    },
+    setActiveRole(role) {
+      setRequestedRole(role);
+    },
+    clearActiveRole() {
+      setRequestedRole(null);
     },
     redirectToLogin(redirectTo = window.location.href) {
       if (!useSupabase) {
