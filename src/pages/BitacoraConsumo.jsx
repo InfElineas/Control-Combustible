@@ -84,6 +84,45 @@ export default function BitacoraConsumo() {
   const { canEdit } = useUserRole();
   const queryClient = useQueryClient();
   const [csvText, setCsvText] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  function splitCsvLine(line, delimiter = ',') {
+    const result = [];
+    let current = '';
+    let insideQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i];
+      const next = line[i + 1];
+
+      if (char === '"' && insideQuotes && next === '"') {
+        current += '"';
+        i += 1;
+        continue;
+      }
+
+      if (char === '"') {
+        insideQuotes = !insideQuotes;
+        continue;
+      }
+
+      if (char === delimiter && !insideQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current);
+    return result;
+  }
+
+  function detectDelimiter(headerLine = '') {
+    const delimiters = [',', ';', '\t'];
+    const scored = delimiters.map((d) => ({ d, count: splitCsvLine(headerLine, d).length }));
+    scored.sort((a, b) => b.count - a.count);
+    return scored[0]?.d || ',';
+  }
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['bitacora_consumo'],
@@ -98,9 +137,10 @@ export default function BitacoraConsumo() {
         .filter(Boolean);
 
       if (lines.length <= 1) throw new Error('No hay filas para importar');
+      const delimiter = detectDelimiter(lines[0]);
 
       const dataLines = lines.slice(1);
-      const mapped = dataLines.map(mapCsvLineToRecord).filter(Boolean);
+      const mapped = dataLines.map((line) => mapColumnsToRecord(splitCsvLine(line, delimiter))).filter(Boolean);
       if (mapped.length === 0) throw new Error('No se encontraron registros válidos');
 
       for (const item of mapped) {
@@ -130,7 +170,8 @@ export default function BitacoraConsumo() {
         const text = await file.text();
         const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
         if (lines.length <= 1) throw new Error('No hay filas para importar');
-        mapped = lines.slice(1).map(mapCsvLineToRecord).filter(Boolean);
+        const delimiter = detectDelimiter(lines[0]);
+        mapped = lines.slice(1).map((line) => mapColumnsToRecord(splitCsvLine(line, delimiter))).filter(Boolean);
       } else if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.ods')) {
         const XLSX = await loadSheetJs();
         const buffer = await file.arrayBuffer();
@@ -153,6 +194,7 @@ export default function BitacoraConsumo() {
     },
     onSuccess: (count) => {
       toast.success(`Archivo importado: ${count} registros`);
+      setSelectedFile(null);
       queryClient.invalidateQueries({ queryKey: ['bitacora_consumo'] });
     },
     onError: (error) => {
@@ -192,10 +234,19 @@ export default function BitacoraConsumo() {
               <input
                 type="file"
                 accept=".csv,.txt,.tsv,.xls,.xlsx,.ods"
-                onChange={(e) => importFileMutation.mutate(e.target.files?.[0])}
+                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                 disabled={importFileMutation.isPending}
                 className="text-xs"
               />
+              <div className="mt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => importFileMutation.mutate(selectedFile)}
+                  disabled={importFileMutation.isPending || !selectedFile}
+                >
+                  Importar archivo seleccionado
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
