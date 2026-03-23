@@ -1,12 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import ImportGuide from '@/components/configuracion/ImportGuide';
+import { Upload, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
 
 let sheetJsPromise = null;
 
@@ -231,8 +231,8 @@ function mapObjectToRecord(raw = {}) {
 export default function Configuracion() {
   const { canEdit } = useUserRole();
   const queryClient = useQueryClient();
-  const [csvText, setCsvText] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+  const fileInputRef = useRef(null);
 
   function splitCsvLine(line, delimiter = ',') {
     const result = [];
@@ -271,44 +271,6 @@ export default function Configuracion() {
     scored.sort((a, b) => b.count - a.count);
     return scored[0]?.d || ',';
   }
-
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ['bitacora_consumo'],
-    queryFn: () => base44.entities.BitacoraConsumo.list('-fecha', 500),
-  });
-
-  const importMutation = useMutation({
-    mutationFn: async (inputCsv) => {
-      const lines = String(inputCsv || '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-      if (lines.length <= 1) throw new Error('No hay filas para importar');
-      const delimiter = detectDelimiter(lines[0]);
-      const headerLookup = buildHeaderLookup(splitCsvLine(lines[0], delimiter));
-
-      const dataLines = lines.slice(1);
-      const mapped = dataLines
-        .map((line) => mapColumnsToRecord(splitCsvLine(line, delimiter), headerLookup))
-        .filter(Boolean);
-      if (mapped.length === 0) throw new Error('No se encontraron registros válidos');
-
-      for (const item of mapped) {
-        await base44.entities.BitacoraConsumo.create(item);
-      }
-
-      return mapped.length;
-    },
-    onSuccess: (count) => {
-      toast.success(`Importación completada: ${count} registros`);
-      setCsvText('');
-      queryClient.invalidateQueries({ queryKey: ['bitacora_consumo'] });
-    },
-    onError: (error) => {
-      toast.error(error?.message || 'No se pudo importar la bitácora');
-    },
-  });
 
   const importFileMutation = useMutation({
     mutationFn: async (file) => {
@@ -363,7 +325,12 @@ export default function Configuracion() {
     },
   });
 
-  const preview = useMemo(() => rows.slice(0, 20), [rows]);
+  const handleDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const file = event.dataTransfer?.files?.[0];
+    if (file) setSelectedFile(file);
+  };
 
   return (
     <div className="space-y-5">
@@ -374,87 +341,53 @@ export default function Configuracion() {
 
       {canEdit && (
         <>
-          <ImportGuide />
           <Card className="border-0 shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Carga masiva por CSV</CardTitle>
+              <CardTitle className="text-xl text-slate-800">Importar Movimientos</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-xs text-slate-500">Pega aquí contenido CSV o JSON para importar movimientos masivos.</p>
-              <Textarea
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                className="min-h-[220px] font-mono text-xs"
-                placeholder='Tarjeta,Fecha,Tipo Combustible,Precio,Carga L,Carga $,Compra L,Compra $,Chapa,Accion'
-              />
-              <Button onClick={() => importMutation.mutate(csvText)} disabled={importMutation.isPending || !csvText.trim()}>
-                Importar contenido
-              </Button>
-              <div className="border-t pt-3">
-                <p className="text-xs text-slate-500 mb-2">O importa un archivo (JSON, CSV, TXT, TSV, XLS, XLSX, ODS).</p>
+              <div
+                className="border border-dashed border-slate-300 rounded-2xl px-4 py-12 text-center bg-slate-50/60"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+              >
+                <div className="mx-auto mb-3 w-14 h-14 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center">
+                  <Upload className="w-7 h-7" />
+                </div>
+                <p className="text-slate-700 font-medium">Arrastra tu archivo aquí o haz clic para seleccionar</p>
+                <p className="text-xs text-slate-400 mt-1">Formatos soportados:</p>
+                <div className="flex justify-center gap-2 mt-3 text-xs">
+                  <span className="px-2.5 py-1 rounded-md border bg-white inline-flex items-center gap-1"><FileJson className="w-3 h-3" />JSON</span>
+                  <span className="px-2.5 py-1 rounded-md border bg-white inline-flex items-center gap-1"><FileText className="w-3 h-3" />CSV</span>
+                  <span className="px-2.5 py-1 rounded-md border bg-white inline-flex items-center gap-1"><FileSpreadsheet className="w-3 h-3" />XLSX</span>
+                </div>
+                <div className="mt-4">
+                  <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importFileMutation.isPending}>
+                    Seleccionar archivo
+                  </Button>
+                </div>
                 <input
+                  ref={fileInputRef}
                   type="file"
                   accept=".json,.csv,.txt,.tsv,.xls,.xlsx,.ods"
                   onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                   disabled={importFileMutation.isPending}
-                  className="text-xs"
+                  className="hidden"
                 />
-                <div className="mt-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => importFileMutation.mutate(selectedFile)}
-                    disabled={importFileMutation.isPending || !selectedFile}
-                  >
-                    Importar archivo seleccionado
-                  </Button>
+                <div className="mt-4 text-sm text-slate-500">
+                  {selectedFile ? `Archivo seleccionado: ${selectedFile.name}` : 'No hay archivo seleccionado.'}
                 </div>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={() => importFileMutation.mutate(selectedFile)} disabled={importFileMutation.isPending || !selectedFile}>
+                  {importFileMutation.isPending ? 'Importando...' : 'Importar'}
+                </Button>
               </div>
             </CardContent>
           </Card>
+          <ImportGuide />
         </>
       )}
-
-      <Card className="border-0 shadow-sm">
-        <CardHeader>
-          <CardTitle className="text-base">Vista rápida</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-sm text-slate-400 py-4">Cargando...</div>
-          ) : preview.length === 0 ? (
-            <div className="text-sm text-slate-400 py-4">Sin datos en bitácora.</div>
-          ) : (
-            <div className="overflow-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-slate-500 border-b">
-                    <th className="py-2 pr-3">Chapa</th>
-                    <th className="py-2 pr-3">Fecha</th>
-                    <th className="py-2 pr-3">Tipo combustible</th>
-                    <th className="py-2 pr-3">Entrada (L)</th>
-                    <th className="py-2 pr-3">Consumo (L)</th>
-                    <th className="py-2 pr-3">Km recorridos</th>
-                    <th className="py-2 pr-3">Índice real</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.map((r) => (
-                    <tr key={r.id} className="border-b last:border-b-0">
-                      <td className="py-2 pr-3">{r.chapa}</td>
-                      <td className="py-2 pr-3">{r.fecha}</td>
-                      <td className="py-2 pr-3">{r.tipo_combustible || '—'}</td>
-                      <td className="py-2 pr-3">{r.combustible_litros_entrada ?? '—'}</td>
-                      <td className="py-2 pr-3">{r.combustible_litros_consumo ?? '—'}</td>
-                      <td className="py-2 pr-3">{r.km_recorrido ?? '—'}</td>
-                      <td className="py-2 pr-3">{r.indice_consumo_real ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
