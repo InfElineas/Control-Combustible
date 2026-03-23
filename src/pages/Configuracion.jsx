@@ -240,6 +240,7 @@ export default function Configuracion() {
   const { canEdit } = useUserRole();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState(null);
+  const [catalogFile, setCatalogFile] = useState(null);
   const [previewRows, setPreviewRows] = useState([]);
   const fileInputRef = useRef(null);
 
@@ -394,6 +395,123 @@ export default function Configuracion() {
     },
   });
 
+  const importCatalogMutation = useMutation({
+    mutationFn: async (file) => {
+      if (!file) throw new Error('Selecciona un archivo JSON para catálogos');
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+
+      const [tarjetasExist, vehiculosExist, combustiblesExist, preciosExist] = await Promise.all([
+        base44.entities.Tarjeta.list('-created_date', 2000),
+        base44.entities.Vehiculo.list('-created_date', 2000),
+        base44.entities.Combustible.list('-created_date', 500),
+        base44.entities.Precio.list('-created_date', 2000),
+      ]);
+
+      const tarjetaSet = new Set(tarjetasExist.map((t) => String(t.id_tarjeta || '').trim()).filter(Boolean));
+      const vehiculoSet = new Set(vehiculosExist.map((v) => String(v.chapa || '').trim().toUpperCase()).filter(Boolean));
+      const combustibleSet = new Set(combustiblesExist.map((c) => String(c.nombre || '').trim().toLowerCase()).filter(Boolean));
+      const precioSet = new Set(preciosExist.map((p) => `${p.combustible_nombre}|${p.fecha_desde}|${p.precio_por_litro}`));
+
+      const summary = { tarjetas: 0, vehiculos: 0, combustibles: 0, precios: 0, omitidos: 0 };
+
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') {
+          summary.omitidos += 1;
+          continue;
+        }
+
+        if ('id_tarjeta' in row || 'saldo_inicial' in row) {
+          const payload = {
+            alias: row.alias ?? null,
+            moneda: row.moneda ?? 'USD',
+            id_tarjeta: row.id_tarjeta ?? row.alias,
+            saldo_inicial: row.saldo_inicial ?? 0,
+            umbral_alerta: row.umbral_alerta ?? null,
+            activa: row.activa ?? true,
+          };
+          const key = String(payload.id_tarjeta || '').trim();
+          if (!key || tarjetaSet.has(key)) {
+            summary.omitidos += 1;
+            continue;
+          }
+          await base44.entities.Tarjeta.create(payload);
+          tarjetaSet.add(key);
+          summary.tarjetas += 1;
+          continue;
+        }
+
+        if ('chapa' in row) {
+          const payload = {
+            alias: row.alias ?? null,
+            activa: row.activa ?? true,
+            chapa: row.chapa,
+            area_centro: row.area_centro ?? null,
+            odometro_inicial: row.odometro_inicial ?? null,
+          };
+          const key = String(payload.chapa || '').trim().toUpperCase();
+          if (!key || vehiculoSet.has(key)) {
+            summary.omitidos += 1;
+            continue;
+          }
+          await base44.entities.Vehiculo.create(payload);
+          vehiculoSet.add(key);
+          summary.vehiculos += 1;
+          continue;
+        }
+
+        if ('precio_por_litro' in row || 'combustible_id' in row) {
+          const payload = {
+            combustible_nombre: row.combustible_nombre,
+            fecha_desde: row.fecha_desde,
+            combustible_id: row.combustible_id ?? null,
+            precio_por_litro: row.precio_por_litro,
+          };
+          const key = `${payload.combustible_nombre}|${payload.fecha_desde}|${payload.precio_por_litro}`;
+          if (!payload.combustible_nombre || !payload.fecha_desde || precioSet.has(key)) {
+            summary.omitidos += 1;
+            continue;
+          }
+          await base44.entities.Precio.create(payload);
+          precioSet.add(key);
+          summary.precios += 1;
+          continue;
+        }
+
+        if ('nombre' in row) {
+          const payload = { nombre: row.nombre, activa: row.activa ?? true };
+          const key = String(payload.nombre || '').trim().toLowerCase();
+          if (!key || combustibleSet.has(key)) {
+            summary.omitidos += 1;
+            continue;
+          }
+          await base44.entities.Combustible.create(payload);
+          combustibleSet.add(key);
+          summary.combustibles += 1;
+          continue;
+        }
+
+        summary.omitidos += 1;
+      }
+
+      return summary;
+    },
+    onSuccess: (summary) => {
+      toast.success(
+        `Catálogos importados: ${summary.tarjetas} tarjetas, ${summary.vehiculos} vehículos, ${summary.combustibles} combustibles, ${summary.precios} precios.`,
+      );
+      setCatalogFile(null);
+      queryClient.invalidateQueries({ queryKey: ['tarjetas'] });
+      queryClient.invalidateQueries({ queryKey: ['vehiculos'] });
+      queryClient.invalidateQueries({ queryKey: ['combustibles'] });
+      queryClient.invalidateQueries({ queryKey: ['precios'] });
+    },
+    onError: (error) => {
+      toast.error(error?.message || 'No se pudo importar el catálogo');
+    },
+  });
+
   const handleDrop = (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -500,6 +618,31 @@ export default function Configuracion() {
             </Card>
           )}
           <ImportGuide />
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Importar catálogos (Tarjetas, Vehículos, Combustibles, Precios)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-slate-500">
+                Sube un JSON con objetos de tarjetas, vehículos, combustibles y precios. Los existentes se omiten.
+              </p>
+              <input
+                type="file"
+                accept=".json"
+                onChange={(e) => setCatalogFile(e.target.files?.[0] || null)}
+                disabled={importCatalogMutation.isPending}
+                className="text-xs"
+              />
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => importCatalogMutation.mutate(catalogFile)}
+                  disabled={importCatalogMutation.isPending || !catalogFile}
+                >
+                  {importCatalogMutation.isPending ? 'Importando catálogo...' : 'Importar catálogo'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
