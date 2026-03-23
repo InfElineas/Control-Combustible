@@ -59,7 +59,7 @@ import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
-    "BitacoraConsumo": BitacoraConsumo,
+    // BitacoraConsumo eliminado: la importación vive en "Configuracion"
     "Combustibles": Combustibles,
     "Configuracion": Configuracion,
     "Dashboard": Dashboard,
