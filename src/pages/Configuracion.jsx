@@ -1,13 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import ImportGuide from '@/components/configuracion/ImportGuide';
 import ImportResultsTable from '@/components/configuracion/ImportResultsTable';
-import { Upload, FileJson, FileSpreadsheet, FileText } from 'lucide-react';
+import { Upload, FileJson, FileSpreadsheet, FileText, CircleAlert, CircleX, CircleCheck } from 'lucide-react';
 
 let sheetJsPromise = null;
 
@@ -233,8 +233,21 @@ export default function Configuracion() {
   const { canEdit } = useUserRole();
   const queryClient = useQueryClient();
   const [selectedFile, setSelectedFile] = useState(null);
-  const [importResults, setImportResults] = useState([]);
+  const [previewRows, setPreviewRows] = useState([]);
   const fileInputRef = useRef(null);
+
+  const { data: tarjetas = [] } = useQuery({
+    queryKey: ['tarjetas-import-ref'],
+    queryFn: () => base44.entities.Tarjeta.list('-created_date', 1000),
+  });
+  const { data: vehiculos = [] } = useQuery({
+    queryKey: ['vehiculos-import-ref'],
+    queryFn: () => base44.entities.Vehiculo.list('-created_date', 1000),
+  });
+  const { data: combustibles = [] } = useQuery({
+    queryKey: ['combustibles-import-ref'],
+    queryFn: () => base44.entities.Combustible.list('-created_date', 200),
+  });
 
   function splitCsvLine(line, delimiter = ',') {
     const result = [];
@@ -274,8 +287,7 @@ export default function Configuracion() {
     return scored[0]?.d || ',';
   }
 
-  const importFileMutation = useMutation({
-    mutationFn: async (file) => {
+  const parseFileToMappedRecords = async (file) => {
       if (!file) throw new Error('Selecciona un archivo primero');
       const name = file.name.toLowerCase();
 
@@ -311,32 +323,66 @@ export default function Configuracion() {
       }
 
       if (mapped.length === 0) throw new Error('No se encontraron registros válidos');
-
-      for (const item of mapped) {
-        await base44.entities.BitacoraConsumo.create(item);
-      }
       return mapped;
-    },
-    onSuccess: (mappedRows) => {
-      const results = mappedRows.map((item) => ({
+  };
+
+  const buildPreviewRows = (mappedRows = []) => {
+    const tarjetaSet = new Set(tarjetas.map((t) => String(t.numero || t.alias || '').trim()).filter(Boolean));
+    const vehiculoSet = new Set(vehiculos.map((v) => String(v.chapa || '').trim().toUpperCase()).filter(Boolean));
+    const combustibleSet = new Set(combustibles.map((c) => String(c.nombre || '').trim().toLowerCase()).filter(Boolean));
+
+    return mappedRows.map((item) => {
+      const errors = [];
+      const warnings = [];
+      const accion = item.combustible_litros_entrada != null ? 'RECARGA' : 'COMPRA';
+      const tarjeta = String(item.origen_entrada || '').trim();
+      const chapa = String(item.chapa || '').trim().toUpperCase();
+      const combustible = String(item.tipo_combustible || '').trim();
+
+      if (accion !== 'RECARGA' && chapa && !vehiculoSet.has(chapa)) errors.push('Vehículo no registrado');
+      if (tarjeta && /^\d+$/.test(tarjeta) && !tarjetaSet.has(tarjeta)) warnings.push('Tarjeta no registrada');
+      if (combustible && !combustibleSet.has(combustible.toLowerCase())) errors.push('Combustible no registrado');
+
+      return {
+        record: item,
         fecha: item.fecha,
-        accion: item.combustible_litros_entrada != null ? 'RECARGA' : 'COMPRA',
-        status: 'ok',
+        accion,
+        row: { Tarjeta: tarjeta, Chapa: item.chapa, 'Tipo Combustible': combustible },
         movimiento: {
           fecha: item.fecha,
-          tarjeta_alias: item.origen_entrada || 'Reserva',
-          vehiculo_chapa: item.chapa,
-          combustible_nombre: item.tipo_combustible,
+          tarjeta_alias: tarjeta ? `Tarjeta #${tarjeta.slice(-5)}` : 'Reserva',
+          vehiculo_chapa: accion === 'RECARGA' ? '—' : item.chapa,
+          combustible_nombre: combustible || '—',
           monto: item.combustible_litros_consumo ?? item.combustible_litros_entrada ?? null,
         },
-      }));
-      setImportResults(results);
-      toast.success(`Archivo importado: ${mappedRows.length} registros`);
-      setSelectedFile(null);
-      queryClient.invalidateQueries({ queryKey: ['bitacora_consumo'] });
+        errors,
+        warnings,
+      };
+    });
+  };
+
+  const importFileMutation = useMutation({
+    mutationFn: async (rowsToImport) => {
+      const results = [];
+      for (const row of rowsToImport) {
+        if (row.errors?.length) {
+          results.push({ ...row, status: 'skipped' });
+          continue;
+        }
+        try {
+          await base44.entities.BitacoraConsumo.create(row.record);
+          results.push({ ...row, status: 'ok' });
+        } catch (error) {
+          results.push({ ...row, status: 'error', errors: [error?.message || 'Error al crear registro'] });
+        }
+      }
+      return results;
     },
-    onError: (error) => {
-      toast.error(error?.message || 'No se pudo importar el archivo');
+    onSuccess: (results) => {
+      setPreviewRows(results);
+      const okCount = results.filter((r) => r.status === 'ok').length;
+      toast.success(`Archivo importado: ${okCount} registros`);
+      queryClient.invalidateQueries({ queryKey: ['bitacora_consumo'] });
     },
   });
 
@@ -346,7 +392,9 @@ export default function Configuracion() {
     const file = event.dataTransfer?.files?.[0];
     if (file) {
       setSelectedFile(file);
-      importFileMutation.mutate(file);
+      parseFileToMappedRecords(file)
+        .then((rows) => setPreviewRows(buildPreviewRows(rows)))
+        .catch((error) => toast.error(error?.message || 'No se pudo procesar el archivo'));
     }
   };
 
@@ -391,7 +439,10 @@ export default function Configuracion() {
                   onChange={(e) => {
                     const file = e.target.files?.[0] || null;
                     setSelectedFile(file);
-                    if (file) importFileMutation.mutate(file);
+                    if (!file) return;
+                    parseFileToMappedRecords(file)
+                      .then((rows) => setPreviewRows(buildPreviewRows(rows)))
+                      .catch((error) => toast.error(error?.message || 'No se pudo procesar el archivo'));
                   }}
                   disabled={importFileMutation.isPending}
                   className="hidden"
@@ -402,8 +453,45 @@ export default function Configuracion() {
               </div>
             </CardContent>
           </Card>
+          {previewRows.length > 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="pt-5 space-y-4">
+                <div className="flex flex-wrap items-center gap-5 text-3.5">
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <CircleCheck className="w-5 h-5 text-emerald-500" />
+                    <span>{previewRows.filter((r) => (r.status ? r.status === 'ok' : r.errors.length === 0)).length} listos para importar</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <CircleAlert className="w-5 h-5 text-amber-500" />
+                    <span>{previewRows.filter((r) => r.warnings?.length > 0).length} con advertencias</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-slate-600">
+                    <CircleX className="w-5 h-5 text-red-500" />
+                    <span>{previewRows.filter((r) => r.errors?.length > 0).length} con errores (se omitirán)</span>
+                  </div>
+                </div>
+                <ImportResultsTable rows={previewRows} mode={importFileMutation.isSuccess ? 'results' : 'preview'} />
+                <div className="flex justify-end gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedFile(null);
+                      setPreviewRows([]);
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => importFileMutation.mutate(previewRows)}
+                    disabled={importFileMutation.isPending || previewRows.length === 0}
+                  >
+                    {importFileMutation.isPending ? 'Importando...' : `Importar ${previewRows.length} registros`}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           <ImportGuide />
-          <ImportResultsTable rows={importResults} mode="results" />
         </>
       )}
     </div>
