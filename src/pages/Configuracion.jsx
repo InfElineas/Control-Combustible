@@ -254,7 +254,7 @@ export default function Configuracion() {
   });
   const { data: combustibles = [] } = useQuery({
     queryKey: ['combustibles-import-ref'],
-    queryFn: () => base44.entities.Combustible.list('-created_date', 200),
+    queryFn: () => base44.entities.TipoCombustible.list('-created_date', 200),
   });
 
   function splitCsvLine(line, delimiter = ',') {
@@ -405,8 +405,8 @@ export default function Configuracion() {
       const [tarjetasExist, vehiculosExist, combustiblesExist, preciosExist] = await Promise.all([
         base44.entities.Tarjeta.list('-created_date', 2000),
         base44.entities.Vehiculo.list('-created_date', 2000),
-        base44.entities.Combustible.list('-created_date', 500),
-        base44.entities.Precio.list('-created_date', 2000),
+        base44.entities.TipoCombustible.list('-created_date', 500),
+        base44.entities.PrecioCombustible.list('-created_date', 2000),
       ]);
 
       const tarjetaSet = new Set(tarjetasExist.map((t) => String(t.id_tarjeta || '').trim()).filter(Boolean));
@@ -473,7 +473,7 @@ export default function Configuracion() {
             summary.omitidos += 1;
             continue;
           }
-          await base44.entities.Precio.create(payload);
+          await base44.entities.PrecioCombustible.create(payload);
           precioSet.add(key);
           summary.precios += 1;
           continue;
@@ -486,7 +486,7 @@ export default function Configuracion() {
             summary.omitidos += 1;
             continue;
           }
-          await base44.entities.Combustible.create(payload);
+          await base44.entities.TipoCombustible.create(payload);
           combustibleSet.add(key);
           summary.combustibles += 1;
           continue;
