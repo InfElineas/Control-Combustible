@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
+import ImportGuide from '@/components/bitacora/ImportGuide';
 
 let sheetJsPromise = null;
 
@@ -70,9 +71,33 @@ function parseDate(value) {
 
   const raw = String(value || '').trim();
   if (!raw) return null;
-  const [yy, mm, dd] = raw.split('/');
-  if (!yy || !mm || !dd) return null;
-  return `20${yy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const slashParts = raw.split('/');
+  if (slashParts.length !== 3) return null;
+
+  let year;
+  let month;
+  let day;
+
+  if (slashParts[0].length === 4) {
+    [year, month, day] = slashParts;
+  } else if (slashParts[2].length === 4) {
+    [day, month, year] = slashParts;
+  } else {
+    const [a, b, c] = slashParts;
+    if (Number(c) > 31) {
+      [day, month, year] = slashParts;
+    } else {
+      year = `20${a}`;
+      month = b;
+      day = c;
+    }
+  }
+
+  if (!year || !month || !day) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function normalizeHeaderToken(value = '') {
@@ -107,10 +132,11 @@ function buildHeaderLookup(headers = []) {
     fecha: findIndex(['fecha']),
     chapa: findIndex(['chapa', 'vehiculo', 'vehculo']),
     tipo_combustible: findIndex(['tipodecombustible', 'combustible']),
+    accion: findIndex(['accion']),
     combustible_litros_inicio: findIndex(['inicio']),
-    origen_entrada: findIndex(['tarjetas', 'origen']),
-    combustible_litros_entrada: findIndex(['entradacantidad']),
-    combustible_litros_consumo: findIndex(['salidacantidad', 'salidacantida']),
+    origen_entrada: findIndex(['tarjeta', 'tarjetas', 'origen']),
+    combustible_litros_entrada: findIndex(['entradacantidad', 'cargal', 'recargal']),
+    combustible_litros_consumo: findIndex(['salidacantidad', 'salidacantida', 'compral']),
     final_en_tanque: findIndex(['existenciacant', 'exitenciacant']),
   };
 }
@@ -118,6 +144,8 @@ function buildHeaderLookup(headers = []) {
 function mapColumnsToRecord(cols = [], headerLookup = null) {
   if (headerLookup) {
     const pick = (index) => (index >= 0 ? cols[index] : null);
+    const action = String(pick(headerLookup.accion) || '').trim().toUpperCase();
+    const isRecharge = action === 'RECARGA' || action === 'CARGA';
 
     const record = {
       chapa: String(pick(headerLookup.chapa) || '').trim(),
@@ -125,8 +153,8 @@ function mapColumnsToRecord(cols = [], headerLookup = null) {
       combustible_litros_inicio: parseNumber(pick(headerLookup.combustible_litros_inicio)),
       indice_consumo_fabricante_km: null,
       origen_entrada: String(pick(headerLookup.origen_entrada) || '').trim() || null,
-      combustible_litros_entrada: parseNumber(pick(headerLookup.combustible_litros_entrada)),
-      combustible_litros_consumo: parseNumber(pick(headerLookup.combustible_litros_consumo)),
+      combustible_litros_entrada: isRecharge ? parseNumber(pick(headerLookup.combustible_litros_entrada)) : null,
+      combustible_litros_consumo: isRecharge ? null : parseNumber(pick(headerLookup.combustible_litros_consumo)),
       final_en_tanque: parseNumber(pick(headerLookup.final_en_tanque)),
       odometro_inicio: null,
       odometro_final: null,
@@ -137,7 +165,9 @@ function mapColumnsToRecord(cols = [], headerLookup = null) {
       indice_consumo_real: null,
     };
 
-    if (!record.chapa || !record.fecha) return null;
+    if (!record.fecha || (!record.chapa && !record.origen_entrada)) return null;
+    if (!record.chapa) record.chapa = String(record.origen_entrada || '').trim();
+    if (!record.chapa) return null;
     return record;
   }
 
@@ -305,44 +335,47 @@ export default function BitacoraConsumo() {
       </div>
 
       {canEdit && (
-        <Card className="border-0 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base">Carga masiva por CSV</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-slate-500">
-              Pega aquí el contenido CSV con cabecera (Chapa, Fecha, Combustible litros / Inicio en Tanque, ...).
-            </p>
-            <Textarea
-              value={csvText}
-              onChange={(e) => setCsvText(e.target.value)}
-              className="min-h-[220px] font-mono text-xs"
-              placeholder="Chapa,Fecha,Combustible litros / Inicio en Tanque,..."
-            />
-            <Button onClick={() => importMutation.mutate(csvText)} disabled={importMutation.isPending || !csvText.trim()}>
-              Importar contenido
-            </Button>
-            <div className="border-t pt-3">
-              <p className="text-xs text-slate-500 mb-2">O importa un archivo (CSV, TXT, TSV, XLS, XLSX, ODS).</p>
-              <input
-                type="file"
-                accept=".csv,.txt,.tsv,.xls,.xlsx,.ods"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                disabled={importFileMutation.isPending}
-                className="text-xs"
+        <>
+          <ImportGuide />
+          <Card className="border-0 shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Carga masiva por CSV</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-slate-500">
+                Pega aquí el contenido CSV con cabecera (Chapa, Fecha, Combustible litros / Inicio en Tanque, ...).
+              </p>
+              <Textarea
+                value={csvText}
+                onChange={(e) => setCsvText(e.target.value)}
+                className="min-h-[220px] font-mono text-xs"
+                placeholder="Chapa,Fecha,Combustible litros / Inicio en Tanque,..."
               />
-              <div className="mt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => importFileMutation.mutate(selectedFile)}
-                  disabled={importFileMutation.isPending || !selectedFile}
-                >
-                  Importar archivo seleccionado
-                </Button>
+              <Button onClick={() => importMutation.mutate(csvText)} disabled={importMutation.isPending || !csvText.trim()}>
+                Importar contenido
+              </Button>
+              <div className="border-t pt-3">
+                <p className="text-xs text-slate-500 mb-2">O importa un archivo (CSV, TXT, TSV, XLS, XLSX, ODS).</p>
+                <input
+                  type="file"
+                  accept=".csv,.txt,.tsv,.xls,.xlsx,.ods"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  disabled={importFileMutation.isPending}
+                  className="text-xs"
+                />
+                <div className="mt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => importFileMutation.mutate(selectedFile)}
+                    disabled={importFileMutation.isPending || !selectedFile}
+                  >
+                    Importar archivo seleccionado
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       <Card className="border-0 shadow-sm">
