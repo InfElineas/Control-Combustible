@@ -138,6 +138,9 @@ function buildHeaderLookup(headers = []) {
     origen_entrada: findIndex(['tarjeta', 'tarjetas', 'origen']),
     combustible_litros_entrada: findIndex(['entradacantidad', 'cargal', 'recargal']),
     combustible_litros_consumo: findIndex(['salidacantidad', 'salidacantida', 'compral']),
+    compra_monto: findIndex(['compra', 'compras']),
+    recarga_monto: findIndex(['carga', 'cargas', 'recarga', 'recargas']),
+    precio: findIndex(['precio']),
     final_en_tanque: findIndex(['existenciacant', 'exitenciacant']),
   };
 }
@@ -156,6 +159,8 @@ function mapColumnsToRecord(cols = [], headerLookup = null) {
       origen_entrada: String(pick(headerLookup.origen_entrada) || '').trim() || null,
       combustible_litros_entrada: isRecharge ? parseNumber(pick(headerLookup.combustible_litros_entrada)) : null,
       combustible_litros_consumo: isRecharge ? null : parseNumber(pick(headerLookup.combustible_litros_consumo)),
+      _monto: isRecharge ? parseNumber(pick(headerLookup.recarga_monto)) : parseNumber(pick(headerLookup.compra_monto)),
+      _precio: parseNumber(pick(headerLookup.precio)),
       final_en_tanque: parseNumber(pick(headerLookup.final_en_tanque)),
       odometro_inicio: null,
       odometro_final: null,
@@ -216,6 +221,8 @@ function mapObjectToRecord(raw = {}) {
     origen_entrada: String(origen || '').trim() || null,
     combustible_litros_entrada: isRecharge ? parseNumber(normalized.cargal ?? normalized.recargal) : null,
     combustible_litros_consumo: isRecharge ? null : parseNumber(normalized.compral ?? normalized.salidacantidad),
+    _monto: isRecharge ? parseNumber(normalized.carga ?? normalized.recarga ?? normalized.cargas ?? normalized.recargas) : parseNumber(normalized.compra ?? normalized.compras),
+    _precio: parseNumber(normalized.precio),
     final_en_tanque: parseNumber(normalized.existenciacant ?? normalized.exitenciacant),
     odometro_inicio: null,
     odometro_final: null,
@@ -232,7 +239,7 @@ function mapObjectToRecord(raw = {}) {
 }
 
 function sanitizeRecordForCreate(record) {
-  const { _accion, ...clean } = record || {};
+  const { _accion, _monto, _precio, ...clean } = record || {};
   return clean;
 }
 
@@ -373,12 +380,30 @@ export default function Configuracion() {
   const importFileMutation = useMutation({
     mutationFn: async (rowsToImport) => {
       const results = [];
+      const tarjetaByNumero = new Map(tarjetas.map((t) => [String(t.id_tarjeta || '').trim(), t]));
+      const combustibleByNombre = new Map(combustibles.map((c) => [String(c.nombre || '').trim().toLowerCase(), c]));
       for (const row of rowsToImport) {
         if (row.errors?.length) {
           results.push({ ...row, status: 'skipped' });
           continue;
         }
         try {
+          const tipo = row.accion === 'DESPACHO' ? 'DESPACHO' : row.accion === 'RECARGA' ? 'RECARGA' : 'COMPRA';
+          const tarjetaRef = tarjetaByNumero.get(String(row.record?.origen_entrada || '').trim());
+          const combustibleRef = combustibleByNombre.get(String(row.record?.tipo_combustible || '').trim().toLowerCase());
+          const movimientoPayload = {
+            fecha: row.fecha,
+            tipo,
+            tarjeta_id: tarjetaRef?.id,
+            tarjeta_alias: tarjetaRef?.alias || tarjetaRef?.id_tarjeta || row.record?.origen_entrada || null,
+            vehiculo_chapa: row.movimiento?.vehiculo_chapa && row.movimiento.vehiculo_chapa !== '—' ? row.movimiento.vehiculo_chapa : null,
+            combustible_id: combustibleRef?.id,
+            combustible_nombre: combustibleRef?.nombre || row.record?.tipo_combustible || null,
+            precio: row.record?._precio ?? null,
+            litros: row.record?.combustible_litros_consumo ?? row.record?.combustible_litros_entrada ?? null,
+            monto: row.record?._monto ?? row.movimiento?.monto ?? null,
+          };
+          await base44.entities.Movimiento.create(movimientoPayload);
           await base44.entities.BitacoraConsumo.create(sanitizeRecordForCreate(row.record));
           results.push({ ...row, status: 'ok' });
         } catch (error) {
@@ -392,6 +417,7 @@ export default function Configuracion() {
       const okCount = results.filter((r) => r.status === 'ok').length;
       toast.success(`Archivo importado: ${okCount} registros`);
       queryClient.invalidateQueries({ queryKey: ['bitacora_consumo'] });
+      queryClient.invalidateQueries({ queryKey: ['movimientos'] });
     },
   });
 
