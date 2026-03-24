@@ -63,36 +63,6 @@ export default function Movimientos() {
     });
   }, [movimientos]);
 
-  const movimientosConRecorrido = useMemo(() => {
-    const comprasPorVehiculo = new Map();
-    const comprasOrdenadas = [...movimientos]
-      .filter((m) => m.tipo === 'COMPRA' && m.vehiculo_chapa && m.odometro != null)
-      .sort((a, b) => {
-        const fa = `${a.fecha || ''}|${a.created_date || ''}`;
-        const fb = `${b.fecha || ''}|${b.created_date || ''}`;
-        return fa.localeCompare(fb);
-      });
-
-    comprasOrdenadas.forEach((mov) => {
-      const historial = comprasPorVehiculo.get(mov.vehiculo_chapa) || [];
-      historial.push(mov);
-      comprasPorVehiculo.set(mov.vehiculo_chapa, historial);
-    });
-
-    return movimientos.map((mov) => {
-      if (mov.tipo !== 'COMPRA' || mov.odometro == null || !mov.vehiculo_chapa) {
-        return { ...mov, km_recorridos: null };
-      }
-
-      const historial = comprasPorVehiculo.get(mov.vehiculo_chapa) || [];
-      const index = historial.findIndex((item) => item.id === mov.id);
-      if (index <= 0) return { ...mov, km_recorridos: null };
-      const anterior = historial[index - 1];
-      const delta = Number(mov.odometro) - Number(anterior.odometro);
-      return { ...mov, km_recorridos: Number.isFinite(delta) && delta >= 0 ? delta : null };
-    });
-  }, [movimientos]);
-
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.Movimiento.delete(id),
     onSuccess: () => {
