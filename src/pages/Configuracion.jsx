@@ -448,7 +448,7 @@ export default function Configuracion() {
             activa: row.activa ?? true,
             chapa: row.chapa,
             area_centro: row.area_centro ?? null,
-            odometro_inicial: row.odometro_inicial ?? null,
+            odometro_inicial: row.odometro_inicial ?? 0,
           };
           const key = String(payload.chapa || '').trim().toUpperCase();
           if (!key || vehiculoSet.has(key)) {
