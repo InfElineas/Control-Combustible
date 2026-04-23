@@ -255,29 +255,39 @@ export default function Dashboard() {
     return rows;
   }, [movimientosFiltrados]);
 
-  const consumidoresPorCombustible = useMemo(() => {
-    const map = {};
-    movimientosFiltrados
-      .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.combustible_nombre)
-      .forEach((m) => {
-        const key = m.combustible_nombre;
-        if (!map[key]) map[key] = new Set();
-        if (m.consumidor_id) map[key].add(m.consumidor_id);
-      });
-    return Object.entries(map).map(([comb, ids]) => ({ combustible: comb, total: ids.size }));
-  }, [movimientosFiltrados]);
+  const movimientosFiltradosOrdenados = useMemo(
+    () => [...movimientosFiltrados].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))),
+    [movimientosFiltrados]
+  );
 
-  const alertasPorCombustible = useMemo(() => {
-    const map = {};
-    alertasConsumo.forEach((c) => {
-      const ultCompra = movimientos
-        .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
-        .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0];
-      const comb = ultCompra?.combustible_nombre || 'Sin combustible';
-      map[comb] = (map[comb] || 0) + 1;
-    });
-    return Object.entries(map).map(([combustible, total]) => ({ combustible, total }));
-  }, [alertasConsumo, movimientos, mesFiltro]);
+  const modalDataPorCard = useMemo(() => {
+    const agruparPorCombustible = (rows) => {
+      const map = {};
+      rows.forEach((m) => {
+        const key = m.combustible_nombre || 'Sin combustible';
+        if (!map[key]) map[key] = [];
+        map[key].push(m);
+      });
+      return Object.entries(map)
+        .map(([combustible, movimientos]) => ({ combustible, movimientos }))
+        .sort((a, b) => b.movimientos.length - a.movimientos.length);
+    };
+
+    if (statModal.tipo === 'gasto') {
+      return agruparPorCombustible(movimientosFiltradosOrdenados.filter(m => m.tipo === 'COMPRA' && (m.monto || 0) > 0));
+    }
+    if (statModal.tipo === 'litros') {
+      return agruparPorCombustible(movimientosFiltradosOrdenados.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && (m.litros || 0) > 0));
+    }
+    if (statModal.tipo === 'consumidores') {
+      return agruparPorCombustible(movimientosFiltradosOrdenados.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id));
+    }
+    if (statModal.tipo === 'alertas') {
+      const ids = new Set(alertasConsumo.map(c => c.id));
+      return agruparPorCombustible(movimientosFiltradosOrdenados.filter(m => m.tipo === 'COMPRA' && ids.has(m.consumidor_id)));
+    }
+    return [];
+  }, [statModal.tipo, movimientosFiltradosOrdenados, alertasConsumo]);
 
   return (
     <div className="space-y-6">
@@ -430,32 +440,34 @@ export default function Dashboard() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {statModal.tipo === 'gasto' && resumenPorCombustible.map(res => (
-              <div key={`m-g-${res.nombreCombustible}`} className="flex justify-between text-sm border-b pb-1">
-                <span>{res.nombreCombustible} ({res.comprasOpsMes} compras)</span>
-                <span className="font-semibold">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
-              </div>
-            ))}
-            {statModal.tipo === 'litros' && resumenPorCombustible.map(res => (
-              <div key={`m-l-${res.nombreCombustible}`} className="flex justify-between text-sm border-b pb-1">
-                <span>{res.nombreCombustible}</span>
-                <span className="font-semibold">{res.litrosCompras.toFixed(1)} L comprados · {res.litrosConsumo.toFixed(1)} L despachados</span>
-              </div>
-            ))}
-            {statModal.tipo === 'consumidores' && consumidoresPorCombustible.map(item => (
-              <div key={`m-c-${item.combustible}`} className="flex justify-between text-sm border-b pb-1">
-                <span>{item.combustible}</span>
-                <span className="font-semibold">{item.total} consumidores</span>
-              </div>
-            ))}
-            {statModal.tipo === 'alertas' && (
-              alertasPorCombustible.length > 0 ? alertasPorCombustible.map(item => (
-                <div key={`m-a-${item.combustible}`} className="flex justify-between text-sm border-b pb-1">
-                  <span>{item.combustible}</span>
-                  <span className="font-semibold">{item.total} alertas</span>
+            {modalDataPorCard.length > 0 ? modalDataPorCard.map((grupo) => (
+              <details key={`modal-${statModal.tipo}-${grupo.combustible}`} className="border rounded-lg px-3 py-2">
+                <summary className="cursor-pointer text-sm font-semibold flex justify-between">
+                  <span>{grupo.combustible}</span>
+                  <span>{grupo.movimientos.length} operaciones</span>
+                </summary>
+                <div className="mt-2 space-y-2 max-h-52 overflow-y-auto pr-1">
+                  {grupo.movimientos.map((m) => (
+                    <div key={m.id} className="text-xs border-b pb-1">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-medium">{m.consumidor_nombre || m.vehiculo_chapa || 'Sin consumidor'}</span>
+                        <span>{m.fecha || 'Sin fecha'}</span>
+                      </div>
+                      <div className="flex justify-between gap-2 text-slate-600">
+                        <span>{m.tipo} · {(m.litros || 0).toFixed(1)} L · {formatMoneySymbol(m.monto || 0, 'USD')}</span>
+                        <Link
+                          to={`${createPageUrl('Movimientos')}?movimientoId=${m.id}`}
+                          className="text-sky-600 hover:underline"
+                          onClick={() => setStatModal({ open: false, tipo: null })}
+                        >
+                          Ver movimiento
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )) : <p className="text-sm text-slate-500">No hay alertas críticas para el período.</p>
-            )}
+              </details>
+            )) : <p className="text-sm text-slate-500">No hay operaciones para el período.</p>}
           </div>
         </DialogContent>
       </Dialog>
