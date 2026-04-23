@@ -58,6 +58,14 @@ export default function Dashboard() {
     );
   }, [consumidores]);
 
+  const obtenerCapacidadConsumidor = (consumidor) => {
+    const capacidadTanque = Number(consumidor?.datos_tanque?.capacidad_litros);
+    if (Number.isFinite(capacidadTanque) && capacidadTanque > 0) return capacidadTanque;
+    const capacidadVehiculo = Number(consumidor?.datos_vehiculo?.capacidad_tanque);
+    if (Number.isFinite(capacidadVehiculo) && capacidadVehiculo > 0) return capacidadVehiculo;
+    return 0;
+  };
+
   const resumenPorCombustible = useMemo(() => {
     const keys = new Set([
       ...tipoCombustible.map(c => c.nombre).filter(Boolean),
@@ -110,7 +118,7 @@ export default function Dashboard() {
         ...despachosReservaHistoricos.map(m => m.consumidor_origen_id).filter(Boolean),
       ]);
       const capacidadTotalReserva = [...reservaIdsDelCombustible]
-        .map((id) => consumidores.find(c => c.id === id)?.datos_vehiculo?.capacidad_tanque || 0)
+        .map((id) => obtenerCapacidadConsumidor(consumidores.find(c => c.id === id)))
         .reduce((s, v) => s + (Number(v) || 0), 0);
       const litrosEnTanqueEstimado = Math.max(
         0,
