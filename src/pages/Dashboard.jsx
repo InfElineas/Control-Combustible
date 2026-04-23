@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, CreditCard, ArrowLeftRight, TrendingDown, TrendingUp, Users, CalendarDays } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
@@ -23,6 +24,7 @@ function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
 
 export default function Dashboard() {
   const [mesFiltro, setMesFiltro] = useState('ALL');
+  const [statModal, setStatModal] = useState({ open: false, tipo: null });
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-fecha', 1000) });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
@@ -90,6 +92,8 @@ export default function Dashboard() {
       const montoCompras = comprasPeriodo.reduce((s, m) => s + (m.monto || 0), 0);
       const litrosConsumo = despachosPeriodo.reduce((s, m) => s + (m.litros || 0), 0);
       const montoConsumo = despachosPeriodo.reduce((s, m) => s + (m.monto || 0), 0);
+      const comprasOpsMes = comprasPeriodo.length;
+      const despachosOpsCombMes = despachosPeriodo.length;
       const recargasOpsMes = comprasReservaPeriodo.length;
       const recargasOpsTotal = comprasReservaHistoricas.length;
       const litrosComprasReservaMes = comprasReservaPeriodo.reduce((s, m) => s + (m.litros || 0), 0);
@@ -162,10 +166,12 @@ export default function Dashboard() {
         montoInicio: Math.max(0, montoInicio),
         litrosCompras,
         montoCompras,
+        comprasOpsMes,
         litrosDisponible: Math.max(0, litrosInicio + litrosCompras),
         montoDisponible: Math.max(0, montoInicio + montoCompras),
         litrosConsumo,
         montoConsumo,
+        despachosOpsCombMes,
         litrosSaldoFinal: Math.max(0, litrosInicio + litrosCompras - litrosConsumo),
         montoSaldoFinal: Math.max(0, montoInicio + montoCompras - montoConsumo),
         capacidadTotalReserva,
@@ -249,6 +255,30 @@ export default function Dashboard() {
     return rows;
   }, [movimientosFiltrados]);
 
+  const consumidoresPorCombustible = useMemo(() => {
+    const map = {};
+    movimientosFiltrados
+      .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.combustible_nombre)
+      .forEach((m) => {
+        const key = m.combustible_nombre;
+        if (!map[key]) map[key] = new Set();
+        if (m.consumidor_id) map[key].add(m.consumidor_id);
+      });
+    return Object.entries(map).map(([comb, ids]) => ({ combustible: comb, total: ids.size }));
+  }, [movimientosFiltrados]);
+
+  const alertasPorCombustible = useMemo(() => {
+    const map = {};
+    alertasConsumo.forEach((c) => {
+      const ultCompra = movimientos
+        .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
+        .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0];
+      const comb = ultCompra?.combustible_nombre || 'Sin combustible';
+      map[comb] = (map[comb] || 0) + 1;
+    });
+    return Object.entries(map).map(([combustible, total]) => ({ combustible, total }));
+  }, [alertasConsumo, movimientos, mesFiltro]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -280,14 +310,14 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Card className="border-0 shadow-sm">
+          <Card className="border-0 shadow-sm cursor-pointer hover:ring-1 hover:ring-sky-200 transition" onClick={() => setStatModal({ open: true, tipo: 'gasto' })}>
             <CardContent className="p-4">
               <p className="text-[11px] text-slate-400 uppercase tracking-wide">Gasto combustible</p>
               <p className="text-lg font-bold text-slate-800 mt-1 leading-tight">{formatMonto(gastoMes)}</p>
               <p className="text-xs text-slate-400 mt-1">{comprasMes.length} compras</p>
             </CardContent>
           </Card>
-          <Card className="border-0 shadow-sm">
+          <Card className="border-0 shadow-sm cursor-pointer hover:ring-1 hover:ring-sky-200 transition" onClick={() => setStatModal({ open: true, tipo: 'litros' })}>
             <CardContent className="p-4">
               <p className="text-[11px] text-slate-400 uppercase tracking-wide">Litros comprados</p>
               <p className="text-lg font-bold text-orange-600 mt-1 leading-tight inline-flex items-baseline gap-1.5">
@@ -301,14 +331,14 @@ export default function Dashboard() {
               </p>
             </CardContent>
           </Card>
-          <Card className="border-0 shadow-sm">
+          <Card className="border-0 shadow-sm cursor-pointer hover:ring-1 hover:ring-sky-200 transition" onClick={() => setStatModal({ open: true, tipo: 'consumidores' })}>
             <CardContent className="p-4">
               <p className="text-[11px] text-slate-400 uppercase tracking-wide">Consumidores activos</p>
               <p className="text-lg font-bold text-emerald-600 mt-1 leading-tight">{consumidoresActivos.length}</p>
               <p className="text-xs text-slate-400 mt-1">{tiposConsumidor.filter(t => t.activo !== false).length} tipos</p>
             </CardContent>
           </Card>
-          <Card className={`border-0 shadow-sm ${alertasConsumo.length > 0 ? 'ring-1 ring-red-200 bg-red-50/20' : ''}`}>
+          <Card className={`border-0 shadow-sm cursor-pointer transition hover:ring-1 hover:ring-sky-200 ${alertasConsumo.length > 0 ? 'ring-1 ring-red-200 bg-red-50/20' : ''}`} onClick={() => setStatModal({ open: true, tipo: 'alertas' })}>
             <CardContent className="p-4">
               <p className="text-[11px] text-slate-400 uppercase tracking-wide">Consumo crítico</p>
               <p className={`text-lg font-bold mt-1 leading-tight ${alertasConsumo.length > 0 ? 'text-red-500' : 'text-slate-400'}`}>
@@ -344,7 +374,6 @@ export default function Dashboard() {
                       <span className="text-slate-400 col-span-3 mt-1">Litros / Valor</span>
                       <span>Inicio</span><span className="text-right">{res.litrosInicio.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoInicio, res.moneda)}</span>
                       <span>Compras</span><span className="text-right">{res.litrosCompras.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
-                      <span className="font-semibold">Total disponible</span><span className="text-right font-semibold">{res.litrosDisponible.toFixed(1)}</span><span className="text-right font-semibold">{formatMoneySymbol(res.montoDisponible, res.moneda)}</span>
                       <span className="text-slate-400 col-span-3 mt-1">Consumo</span>
                       {res.detalleConsumo.map(item => (
                         <React.Fragment key={`${res.nombreCombustible}-${item.nombre}`}>
@@ -373,7 +402,6 @@ export default function Dashboard() {
                       <span className="text-slate-400 col-span-3 mt-1">Litros / Valor</span>
                       <span>Inicio</span><span className="text-right">{res.litrosInicioReserva.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoInicioReserva, res.moneda)}</span>
                       <span>Compras reserva</span><span className="text-right">{res.litrosComprasReservaMes.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.costoRecargasMes, res.moneda)}</span>
-                      <span className="font-semibold">Total disponible</span><span className="text-right font-semibold">{res.litrosTotalDisponibleReserva.toFixed(1)}</span><span className="text-right font-semibold">{formatMoneySymbol(res.montoTotalDisponibleReserva, res.moneda)}</span>
                       <span className="text-slate-400 col-span-3 mt-1">Despachos relacionados</span>
                       {res.detalleConsumoReserva.map(item => (
                         <React.Fragment key={`${res.nombreCombustible}-r-${item.nombre}`}>
@@ -390,6 +418,47 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      <Dialog open={statModal.open} onOpenChange={(open) => setStatModal(s => ({ ...s, open }))}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {statModal.tipo === 'gasto' && 'Detalle de gasto por combustible'}
+              {statModal.tipo === 'litros' && 'Detalle de litros por combustible'}
+              {statModal.tipo === 'consumidores' && 'Consumidores por combustible'}
+              {statModal.tipo === 'alertas' && 'Alertas críticas por combustible'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {statModal.tipo === 'gasto' && resumenPorCombustible.map(res => (
+              <div key={`m-g-${res.nombreCombustible}`} className="flex justify-between text-sm border-b pb-1">
+                <span>{res.nombreCombustible} ({res.comprasOpsMes} compras)</span>
+                <span className="font-semibold">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
+              </div>
+            ))}
+            {statModal.tipo === 'litros' && resumenPorCombustible.map(res => (
+              <div key={`m-l-${res.nombreCombustible}`} className="flex justify-between text-sm border-b pb-1">
+                <span>{res.nombreCombustible}</span>
+                <span className="font-semibold">{res.litrosCompras.toFixed(1)} L comprados · {res.litrosConsumo.toFixed(1)} L despachados</span>
+              </div>
+            ))}
+            {statModal.tipo === 'consumidores' && consumidoresPorCombustible.map(item => (
+              <div key={`m-c-${item.combustible}`} className="flex justify-between text-sm border-b pb-1">
+                <span>{item.combustible}</span>
+                <span className="font-semibold">{item.total} consumidores</span>
+              </div>
+            ))}
+            {statModal.tipo === 'alertas' && (
+              alertasPorCombustible.length > 0 ? alertasPorCombustible.map(item => (
+                <div key={`m-a-${item.combustible}`} className="flex justify-between text-sm border-b pb-1">
+                  <span>{item.combustible}</span>
+                  <span className="font-semibold">{item.total} alertas</span>
+                </div>
+              )) : <p className="text-sm text-slate-500">No hay alertas críticas para el período.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Alertas de consumo crítico */}
       {alertasConsumo.length > 0 && (
