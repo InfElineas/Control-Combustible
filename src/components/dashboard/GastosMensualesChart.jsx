@@ -31,7 +31,7 @@ export default function GastosMensualesChart({ movimientos }) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl px-3 py-2 shadow-lg text-xs">
         <p className="font-semibold text-slate-700 mb-1">{label}</p>
-        <p className="text-slate-600">Gasto: <span className="font-bold text-slate-800">$ {formatMonto(Number(payload[0]?.value || 0))}</span></p>
+        <p className="text-slate-600">Gasto: <span className="font-bold text-slate-800">{formatMonto(Number(payload[0]?.value || 0))}</span></p>
         <p className="text-slate-400">Litros: {Number(payload[0]?.payload?.litros || 0).toFixed(1)} L</p>
       </div>
     );

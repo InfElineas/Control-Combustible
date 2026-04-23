@@ -42,11 +42,8 @@ export default function Dashboard() {
     [tarjetas],
   );
 
-  const symbolByCurrency = { USD: '$', EUR: '€', CUP: '$', MLC: '$' };
   const formatMoneySymbol = (monto, moneda = 'USD') => {
-    const symbol = symbolByCurrency[moneda] || moneda || '$';
-    if (monto == null) return `${symbol} -`;
-    return `${symbol} ${formatMonto(monto)}`;
+    return formatMonto(monto, moneda);
   };
 
   const resumenPorCombustible = useMemo(() => {
