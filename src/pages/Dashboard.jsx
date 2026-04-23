@@ -10,7 +10,7 @@ import { createPageUrl } from '@/utils';
 import GastosMensualesChart from '@/components/dashboard/GastosMensualesChart';
 import ConsumidoresPorTipo from '@/components/dashboard/ConsumidoresPorTipo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { computeChoferDelMes, filterMovimientosByMonth, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
+import { filterMovimientosByMonth, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
 
 function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
   return (
@@ -28,7 +28,6 @@ export default function Dashboard() {
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
   const { data: tiposConsumidor = [] } = useQuery({ queryKey: ['tiposConsumidor'], queryFn: () => base44.entities.TipoConsumidor.list() });
   const { data: tipoCombustible = [] } = useQuery({ queryKey: ['tipoCombustible'], queryFn: () => base44.entities.TipoCombustible.list() });
-  const { data: conductores = [] } = useQuery({ queryKey: ['conductores'], queryFn: () => base44.entities.Conductor.list() });
 
   const hoy = new Date();
   const movimientosFiltrados = filterMovimientosByMonth(movimientos, mesFiltro);
@@ -157,10 +156,6 @@ export default function Dashboard() {
   })();
 
   const hayStockReserva = Object.keys(stockReserva).length > 0;
-  const choferDelMes = useMemo(
-    () => computeChoferDelMes({ month: mesFiltro, movimientos, conductores }),
-    [mesFiltro, movimientos, conductores],
-  );
   const resumenEquipo = useMemo(() => {
     const movs = movimientosFiltrados.filter(m => m.tipo === 'COMPRA' || m.tipo === 'DESPACHO');
     const ultAbast = movs
@@ -257,21 +252,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Equipo + Personal del mes */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4 space-y-1">
-            <p className="text-[11px] text-slate-400 uppercase tracking-wide">Personal del mes</p>
-            {choferDelMes ? (
-              <>
-                <p className="text-lg font-bold text-slate-800">{choferDelMes.conductor.nombre}</p>
-                <p className="text-xs text-slate-500">{choferDelMes.litros.toFixed(1)} L • {choferDelMes.movimientos} movimientos</p>
-              </>
-            ) : (
-              <p className="text-sm text-slate-400">Sin datos para calcular chofer del mes</p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Equipo */}
+      <div className="grid grid-cols-1 gap-3">
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4 space-y-1">
             <p className="text-[11px] text-slate-400 uppercase tracking-wide">Equipo</p>
