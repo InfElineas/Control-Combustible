@@ -66,3 +66,12 @@ Example migration for `litros_iniciales`:
 - SQL:
   - `ALTER TABLE consumidor ADD COLUMN IF NOT EXISTS litros_iniciales numeric DEFAULT 0 NOT NULL;`
   - `UPDATE consumidor SET litros_iniciales = 0 WHERE litros_iniciales IS NULL;`
+
+**Production readiness checklist**
+
+1. Apply pending SQL migrations in Supabase SQL Editor (at least the `litros_iniciales` migration above).
+2. Verify repository health before deploy:
+   - `npm run release:verify`
+3. Publish/deploy after checks pass.
+
+> Note: `typecheck` is currently stricter than the runtime build and may fail on legacy typing debt; production artifact validation should use `release:verify`.
