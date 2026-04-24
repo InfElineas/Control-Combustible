@@ -44,9 +44,15 @@ export default function Precios() {
   };
 
   // Agrupar por combustible
+  const nombreCombustible = (precio) => {
+    if (precio.combustible_nombre) return precio.combustible_nombre;
+    const comb = combustibles.find(c => c.id === precio.combustible_id);
+    return comb?.nombre || precio.combustible_id || 'Sin combustible';
+  };
+
   const grouped = {};
   precios.forEach(p => {
-    const key = p.combustible_nombre || p.combustible_id;
+    const key = nombreCombustible(p);
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(p);
   });
