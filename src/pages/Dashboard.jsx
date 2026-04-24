@@ -405,59 +405,42 @@ export default function Dashboard() {
         {resumenPorCombustible.length === 0 ? (
           <p className="text-sm text-slate-400">No hay datos de consumo para el período seleccionado.</p>
         ) : (
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-slate-700">Consumo total de combustible {mesFiltro === 'ALL' ? 'hasta la fecha' : `(${opcionesMes.find(x => x.key === mesFiltro)?.label || mesFiltro})`}</h3>
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              {resumenPorCombustible.map(res => (
-                <Card key={`${res.nombreCombustible}-total`} className="border border-slate-200 shadow-sm">
-                  <CardContent className="p-3">
-                    <h3 className="text-sm font-bold text-center mb-2">{res.nombreCombustible}</h3>
-                    <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-xs">
-                      <span>Precio</span><span className="text-right">—</span><span className="text-right font-medium">{formatMoneySymbol(res.precioRef, res.moneda)}</span>
-                      <span className="text-slate-400 col-span-3 mt-1">Litros / Valor</span>
-                      <span>Inicio</span><span className="text-right">{res.litrosInicio.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoInicio, res.moneda)}</span>
-                      <span>Compras</span><span className="text-right">{res.litrosCompras.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
-                      <span className="text-slate-400 col-span-3 mt-1">Consumo</span>
-                      {res.detalleConsumo.map(item => (
-                        <React.Fragment key={`${res.nombreCombustible}-${item.nombre}`}>
-                          <span className="truncate">{item.nombre}</span><span className="text-right">{item.litros.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(item.monto, res.moneda)}</span>
-                        </React.Fragment>
-                      ))}
-                      <span className="font-semibold">Total consumo</span><span className="text-right font-semibold">{res.litrosConsumo.toFixed(1)}</span><span className="text-right font-semibold">{formatMoneySymbol(res.montoConsumo, res.moneda)}</span>
-                      <span className="font-bold">Saldo final</span><span className="text-right font-bold">{res.litrosSaldoFinal.toFixed(1)}</span><span className="text-right font-bold">{formatMoneySymbol(res.montoSaldoFinal, res.moneda)}</span>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+            {resumenPorCombustible.map(res => {
+              const saldoReservaL = Math.max(0, res.litrosTotalDisponibleReserva - res.litrosDespachosMes);
+              const saldoReservaMonto = Math.max(0, res.montoTotalDisponibleReserva - res.montoDespachosMes);
+              return (
+                <Card key={res.nombreCombustible} className="border border-slate-200 shadow-sm">
+                  <CardContent className="p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold">{res.nombreCombustible}</h3>
+                      <Badge variant="outline" className="text-[10px]">Precio {formatMoneySymbol(res.precioRef, res.moneda)}</Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-md bg-slate-50 p-2">
+                        <p className="text-slate-400">Recargas (mes)</p>
+                        <p className="font-semibold">{res.recargasOpsMes} ops · {res.litrosComprasReservaMes.toFixed(1)} L</p>
+                        <p>{formatMoneySymbol(res.costoRecargasMes, res.moneda)}</p>
+                      </div>
+                      <div className="rounded-md bg-slate-50 p-2">
+                        <p className="text-slate-400">Despachos (mes)</p>
+                        <p className="font-semibold">{res.despachosOpsMes} ops · {res.litrosDespachosMes.toFixed(1)} L</p>
+                        <p>{formatMoneySymbol(res.montoDespachosMes, res.moneda)}</p>
+                      </div>
+                      <div className="rounded-md bg-slate-50 p-2">
+                        <p className="text-slate-400">Capacidad reserva</p>
+                        <p className="font-semibold">{res.capacidadTotalReserva > 0 ? `${res.capacidadTotalReserva.toFixed(1)} L` : 'No registrada'}</p>
+                      </div>
+                      <div className="rounded-md bg-emerald-50 p-2">
+                        <p className="text-emerald-700">Saldo final reserva</p>
+                        <p className="font-bold text-emerald-700">{saldoReservaL.toFixed(1)} L</p>
+                        <p className="text-emerald-700">{formatMoneySymbol(saldoReservaMonto, res.moneda)}</p>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-
-            <h3 className="text-sm font-semibold text-slate-700">Uso de la reserva almacenada {mesFiltro === 'ALL' ? 'hasta la fecha' : `(${opcionesMes.find(x => x.key === mesFiltro)?.label || mesFiltro})`}</h3>
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              {resumenPorCombustible.map(res => (
-                <Card key={`${res.nombreCombustible}-reserva`} className="border border-slate-200 shadow-sm">
-                  <CardContent className="p-3">
-                    <h3 className="text-sm font-bold text-center mb-2">{res.nombreCombustible}</h3>
-                    <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 text-xs">
-                      <span>Capacidad tanque</span><span className="text-right col-span-2">{res.capacidadTotalReserva > 0 ? `${res.capacidadTotalReserva.toFixed(1)} L` : 'No registrada'}</span>
-                      <span>Le queda al tanque</span><span className="text-right col-span-2">{res.litrosEnTanqueEstimado.toFixed(1)} L</span>
-                      <span>Recargas (ops)</span><span className="text-right">{res.recargasOpsMes}</span><span className="text-right">{res.recargasOpsTotal} total</span>
-                      <span>Costo recarga</span><span className="text-right">{formatMoneySymbol(res.costoRecargasMes, res.moneda)}</span><span className="text-right">{formatMoneySymbol(res.costoRecargasTotal, res.moneda)}</span>
-                      <span className="text-slate-400 col-span-3 mt-1">Litros / Valor</span>
-                      <span>Inicio</span><span className="text-right">{res.litrosInicioReserva.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.montoInicioReserva, res.moneda)}</span>
-                      <span>Compras reserva</span><span className="text-right">{res.litrosComprasReservaMes.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(res.costoRecargasMes, res.moneda)}</span>
-                      <span className="text-slate-400 col-span-3 mt-1">Despachos relacionados</span>
-                      {res.detalleConsumoReserva.map(item => (
-                        <React.Fragment key={`${res.nombreCombustible}-r-${item.nombre}`}>
-                          <span className="truncate">{item.nombre}</span><span className="text-right">{item.litros.toFixed(1)}</span><span className="text-right">{formatMoneySymbol(item.monto, res.moneda)}</span>
-                        </React.Fragment>
-                      ))}
-                      <span className="font-semibold">Total consumo</span><span className="text-right font-semibold">{res.litrosDespachosMes.toFixed(1)}</span><span className="text-right font-semibold">{formatMoneySymbol(res.montoDespachosMes, res.moneda)}</span>
-                      <span className="font-bold">Saldo final</span><span className="text-right font-bold">{Math.max(0, res.litrosTotalDisponibleReserva - res.litrosDespachosMes).toFixed(1)}</span><span className="text-right font-bold">{formatMoneySymbol(Math.max(0, res.montoTotalDisponibleReserva - res.montoDespachosMes), res.moneda)}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+              );
+            })}
           </div>
         )}
       </div>
