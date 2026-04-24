@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useSearchParams } from 'react-router-dom';
 import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Filter, Plus } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
@@ -37,8 +38,19 @@ export default function Movimientos() {
   const { data: combustibles = [] } = useQuery({ queryKey: ['combustibles'], queryFn: () => base44.entities.TipoCombustible.list() });
   const { data: tiposConsumidor = [] } = useQuery({ queryKey: ['tiposConsumidor'], queryFn: () => base44.entities.TipoConsumidor.list() });
 
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState(FILTROS_INICIAL);
   const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    const nombreCombustible = searchParams.get('combustible');
+    if (!nombreCombustible || combustibles.length === 0) return;
+    const match = combustibles.find(c => c.nombre === nombreCombustible);
+    if (match) {
+      setFilters(f => ({ ...f, tipoCombustible: match.id }));
+      setShowFilters(true);
+    }
+  }, [searchParams, combustibles]);
   const [deleteId, setDeleteId] = useState(null);
   const [showNuevo, setShowNuevo] = useState(false);
   const [detalleMovimiento, setDetalleMovimiento] = useState(null);

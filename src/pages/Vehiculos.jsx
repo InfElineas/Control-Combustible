@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Pencil, Power, Trash2, Truck } from 'lucide-react';
+import { Plus, Pencil, Power, Trash2, Truck, TrendingUp, AlertTriangle, Clock } from 'lucide-react';
 import StatusBadge from '@/components/ui-helpers/StatusBadge';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
 import { computeVehiculoMonthlyStats, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
@@ -36,6 +36,47 @@ export default function Vehiculos() {
   const [confirmAction, setConfirmAction] = useState(null);
 
   const opcionesMes = useMemo(() => getMonthOptionsFromMovimientos(movimientos), [movimientos]);
+
+  const resumenParque = useMemo(() => {
+    let totalLitros = 0;
+    let sumConsumo = 0;
+    let countConsumo = 0;
+    let ultimaCargaFecha = '';
+    const filas = [];
+
+    vehiculos.forEach(v => {
+      const stats = computeVehiculoMonthlyStats(v, movimientos, mesFiltro);
+      totalLitros += stats.litrosMes;
+      if (stats.consumoMes > 0) { sumConsumo += stats.consumoMes; countConsumo += 1; }
+      if (stats.fechaUltimoAbastecimiento && stats.fechaUltimoAbastecimiento > ultimaCargaFecha)
+        ultimaCargaFecha = stats.fechaUltimoAbastecimiento;
+
+      const consumoEsperado = Number(v.indice_consumo_real) || 0;
+      let desvPct = null;
+      if (consumoEsperado > 0 && stats.consumoMes > 0)
+        desvPct = ((stats.consumoMes - consumoEsperado) / consumoEsperado) * 100;
+
+      filas.push({
+        v,
+        litrosMes: stats.litrosMes,
+        consumoMes: stats.consumoMes,
+        consumoEsperado,
+        desvPct,
+        ultimaCargaFecha: stats.fechaUltimoAbastecimiento || '',
+        diasDesdeAbast: stats.diasDesdeUltimoAbast,
+      });
+    });
+
+    filas.sort((a, b) => b.litrosMes - a.litrosMes);
+
+    return {
+      totalLitros,
+      consumoPromedio: countConsumo > 0 ? sumConsumo / countConsumo : 0,
+      ultimaCargaFecha,
+      conActividad: filas.filter(f => f.litrosMes > 0),
+      sinActividad: filas.filter(f => f.litrosMes === 0),
+    };
+  }, [vehiculos, movimientos, mesFiltro]);
 
   const createMut = useMutation({
     mutationFn: (d) => base44.entities.Vehiculo.create(d),
@@ -105,6 +146,169 @@ export default function Vehiculos() {
         </div>
       </div>
 
+      {/* Resumen del parque */}
+      {vehiculos.length > 0 && (
+        <div className="space-y-3">
+          {/* KPIs agregados */}
+          <div className="flex items-center gap-2 text-slate-600">
+            <TrendingUp className="w-4 h-4 text-violet-500" />
+            <span className="text-xs font-semibold uppercase tracking-wide">Resumen del parque</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-slate-400 uppercase tracking-wide">Litros del período</p>
+                <p className="text-lg font-bold text-violet-700 mt-1">
+                  {resumenParque.totalLitros > 0 ? `${resumenParque.totalLitros.toFixed(1)} L` : '—'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{resumenParque.conActividad.length} vehículos activos</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-slate-400 uppercase tracking-wide">Consumo prom. parque</p>
+                <p className="text-lg font-bold text-slate-800 mt-1">
+                  {resumenParque.consumoPromedio > 0 ? `${resumenParque.consumoPromedio.toFixed(2)} km/L` : '—'}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">sobre cargas con odómetro</p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-slate-400 uppercase tracking-wide">Última carga (parque)</p>
+                <p className="text-base font-bold text-slate-800 mt-1">
+                  {resumenParque.ultimaCargaFecha || '—'}
+                </p>
+              </CardContent>
+            </Card>
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-3">
+                <p className="text-[11px] text-slate-400 uppercase tracking-wide">Sin actividad</p>
+                <p className="text-lg font-bold text-slate-400 mt-1">{resumenParque.sinActividad.length}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">vehículos sin cargas</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Tabla de ranking por vehículo */}
+          {resumenParque.conActividad.length > 0 && (
+            <Card className="border-0 shadow-sm">
+              <CardContent className="p-0">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Ranking por consumo del período</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[11px] text-slate-400 uppercase tracking-wide">
+                        <th className="text-left px-4 py-2 font-medium">#</th>
+                        <th className="text-left px-4 py-2 font-medium">Vehículo</th>
+                        <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">Combustible</th>
+                        <th className="text-right px-4 py-2 font-medium">Litros</th>
+                        <th className="text-right px-4 py-2 font-medium hidden md:table-cell">Consumo real</th>
+                        <th className="text-right px-4 py-2 font-medium hidden md:table-cell">Eficiencia</th>
+                        <th className="text-right px-4 py-2 font-medium">Días sin carga</th>
+                        <th className="text-left px-4 py-2 font-medium hidden lg:table-cell">Conductor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resumenParque.conActividad.map((fila, idx) => {
+                        const { v, litrosMes, consumoMes, consumoEsperado, desvPct, diasDesdeAbast } = fila;
+                        const esTop = idx === 0;
+
+                        let eficienciaColor = 'text-slate-400';
+                        let eficienciaLabel = '—';
+                        if (desvPct !== null) {
+                          if (desvPct >= -10) { eficienciaColor = 'text-emerald-600'; eficienciaLabel = 'Normal'; }
+                          else if (desvPct >= -25) { eficienciaColor = 'text-amber-600'; eficienciaLabel = 'Alerta'; }
+                          else { eficienciaColor = 'text-red-600'; eficienciaLabel = 'Crítico'; }
+                        }
+
+                        const diasColor = diasDesdeAbast != null && diasDesdeAbast > 30
+                          ? 'text-red-600 font-semibold'
+                          : 'text-slate-600';
+
+                        return (
+                          <tr key={v.id} className={`border-b border-slate-50 hover:bg-slate-50/60 transition-colors ${esTop ? 'bg-violet-50/30' : ''}`}>
+                            <td className="px-4 py-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                {esTop && <span title="Más activo">⭐</span>}
+                                <div>
+                                  <p className="font-semibold text-slate-800">{v.chapa}</p>
+                                  {v.alias && <p className="text-[11px] text-slate-400">{v.alias}</p>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5 hidden sm:table-cell">
+                              {v.combustible_nombre
+                                ? <Badge variant="outline" className="text-[10px] border-orange-200 text-orange-700">{v.combustible_nombre}</Badge>
+                                : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                              {litrosMes.toFixed(1)} L
+                            </td>
+                            <td className="px-4 py-2.5 text-right hidden md:table-cell">
+                              {consumoMes > 0
+                                ? <span className="text-slate-700">{consumoMes.toFixed(2)} km/L</span>
+                                : <span className="text-slate-300">Sin datos</span>}
+                              {consumoEsperado > 0 && (
+                                <p className="text-[11px] text-slate-400">esp. {consumoEsperado} km/L</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-right hidden md:table-cell">
+                              {desvPct !== null ? (
+                                <span className={`font-semibold ${eficienciaColor}`}>
+                                  {eficienciaLabel}
+                                  <span className="text-[11px] font-normal ml-1">({desvPct > 0 ? '+' : ''}{desvPct.toFixed(1)}%)</span>
+                                </span>
+                              ) : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className={`px-4 py-2.5 text-right ${diasColor}`}>
+                              {diasDesdeAbast != null ? (
+                                <span className="inline-flex items-center gap-1 justify-end">
+                                  {diasDesdeAbast > 30 && <AlertTriangle className="w-3 h-3" />}
+                                  {diasDesdeAbast}d
+                                </span>
+                              ) : <span className="text-slate-300">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5 hidden lg:table-cell text-slate-500 truncate max-w-[140px]">
+                              {v.conductor || v.responsable || <span className="text-slate-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Vehículos sin actividad colapsados */}
+                {resumenParque.sinActividad.length > 0 && (
+                  <details className="border-t border-slate-100">
+                    <summary className="px-4 py-2.5 text-[11px] text-slate-400 cursor-pointer hover:text-slate-600 flex items-center gap-1.5">
+                      <Clock className="w-3 h-3" />
+                      {resumenParque.sinActividad.length} vehículo(s) sin cargas en el período
+                    </summary>
+                    <div className="px-4 pb-3 flex flex-wrap gap-2">
+                      {resumenParque.sinActividad.map(({ v, diasDesdeAbast }) => (
+                        <div key={v.id} className="flex items-center gap-1.5 bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs">
+                          <span className="font-medium text-slate-600">{v.chapa}</span>
+                          {diasDesdeAbast != null && (
+                            <span className={`${diasDesdeAbast > 30 ? 'text-red-500' : 'text-slate-400'}`}>
+                              {diasDesdeAbast}d sin carga
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-3">
         {vehiculos.map(v => {
           const stats = computeVehiculoMonthlyStats(v, movimientos, mesFiltro);
@@ -141,7 +345,7 @@ export default function Vehiculos() {
                   </div>
                   <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[11px] text-slate-600">
                     <span><b>Litros del mes:</b> {stats.litrosMes ? `${stats.litrosMes.toFixed(1)} L` : 'Sin datos'}</span>
-                    <span><b>Consumo del mes:</b> {stats.consumoMes ? stats.consumoMes.toFixed(2) : 'No disponible'}</span>
+                    <span><b>Consumo prom.:</b> {stats.consumoMes ? `${stats.consumoMes.toFixed(2)} km/L` : 'No disponible'}</span>
                     <span><b>Odómetro inicio:</b> {stats.odometroInicio != null ? `${stats.odometroInicio.toLocaleString()} km` : 'No disponible'}</span>
                     <span><b>Última carga:</b> {stats.ultimaCarga?.fecha || 'Sin datos'}</span>
                     <span><b>Fecha último abast.:</b> {stats.fechaUltimoAbastecimiento || 'Sin datos'}</span>

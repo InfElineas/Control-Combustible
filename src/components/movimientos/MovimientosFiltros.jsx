@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { X } from 'lucide-react';
 
-const EMPTY = { fechaDesde: '', fechaHasta: '', tipo: 'all', tipoConsumidor: 'all', consumidor: 'all', tipoCombustible: 'all', tarjeta: 'all', chapa: '' };
+const EMPTY = { fechaDesde: '', fechaHasta: '', tipo: 'all', tipoConsumidor: 'all', consumidor: 'all', tarjeta: 'all', chapa: '' };
 
 export default function MovimientosFiltros({ filters, onChange, consumidores, tiposConsumidor, combustibles, tarjetas }) {
   // Consumidores filtrados por tipo seleccionado

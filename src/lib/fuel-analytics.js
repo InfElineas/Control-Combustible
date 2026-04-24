@@ -52,9 +52,10 @@ export function computeVehiculoMonthlyStats(vehiculo, movimientos = [], month = 
   const comprasMes = movsMes.filter((m) => m.tipo === 'COMPRA');
 
   const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
-  const consumoMes = comprasMes
-    .filter((m) => m.consumo_real != null)
-    .reduce((s, m) => s + (m.consumo_real || 0), 0);
+  const consumoMovs = comprasMes.filter((m) => m.consumo_real != null && m.consumo_real > 0);
+  const consumoMes = consumoMovs.length > 0
+    ? consumoMovs.reduce((s, m) => s + (m.consumo_real || 0), 0) / consumoMovs.length
+    : 0;
 
   const odometrosMes = comprasMes.filter((m) => m.odometro != null).map((m) => Number(m.odometro));
   const odometroInicio = odometrosMes.length > 0 ? Math.min(...odometrosMes) : null;
@@ -78,4 +79,26 @@ export function computeVehiculoMonthlyStats(vehiculo, movimientos = [], month = 
     fechaUltimoAbastecimiento,
     diasDesdeUltimoAbast,
   };
+}
+
+export function computeEquipoStats({ consumidores = [], movimientos = [], month = 'ALL' }) {
+  const equipos = consumidores.filter(c =>
+    (c.tipo_consumidor_nombre || '').toLowerCase().includes('equipo') ||
+    (c.tipo_consumidor_nombre || '').toLowerCase().includes('generador')
+  );
+
+  return equipos.map(equipo => {
+    const movsPeriodo = filterMovimientosByMonth(movimientos, month)
+      .filter(m => m.consumidor_id === equipo.id && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO'));
+    const litrosMes = movsPeriodo.reduce((s, m) => s + (m.litros || 0), 0);
+    const ultimaCarga = [...movimientos]
+      .filter(m => m.consumidor_id === equipo.id && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO'))
+      .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0] || null;
+    return {
+      equipo,
+      litrosMes,
+      ultimaCargaFecha: ultimaCarga?.fecha || null,
+      combustible: equipo.combustible_nombre || '—',
+    };
+  });
 }

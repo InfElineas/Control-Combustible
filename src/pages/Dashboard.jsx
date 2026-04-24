@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertTriangle, CreditCard, ArrowLeftRight, TrendingDown, TrendingUp, Users, CalendarDays } from 'lucide-react';
+import { AlertTriangle, CreditCard, ArrowLeftRight, TrendingDown, TrendingUp, Users, CalendarDays, User, Zap } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
@@ -11,7 +11,7 @@ import { createPageUrl } from '@/utils';
 import GastosMensualesChart from '@/components/dashboard/GastosMensualesChart';
 import ConsumidoresPorTipo from '@/components/dashboard/ConsumidoresPorTipo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { filterMovimientosByMonth, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
+import { filterMovimientosByMonth, getMonthOptionsFromMovimientos, computeChoferDelMes, computeEquipoStats } from '@/lib/fuel-analytics';
 
 function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
   return (
@@ -25,11 +25,13 @@ function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
 export default function Dashboard() {
   const [mesFiltro, setMesFiltro] = useState('ALL');
   const [statModal, setStatModal] = useState({ open: false, tipo: null });
+  const [modalGrupoIdx, setModalGrupoIdx] = useState(0);
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-fecha', 1000) });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
   const { data: tiposConsumidor = [] } = useQuery({ queryKey: ['tiposConsumidor'], queryFn: () => base44.entities.TipoConsumidor.list() });
   const { data: tipoCombustible = [] } = useQuery({ queryKey: ['tipoCombustible'], queryFn: () => base44.entities.TipoCombustible.list() });
+  const { data: conductores = [] } = useQuery({ queryKey: ['conductores'], queryFn: () => base44.entities.Conductor.list() });
 
   const hoy = new Date();
   const movimientosFiltrados = filterMovimientosByMonth(movimientos, mesFiltro);
@@ -130,6 +132,9 @@ export default function Dashboard() {
       const litrosDespachosTotal = despachosReservaHistoricos.reduce((s, m) => s + (m.litros || 0), 0);
       const montoDespachosMes = despachosReservaPeriodo.reduce((s, m) => s + (m.monto || 0), 0);
 
+      const ultimaCargaReservaFecha = [...comprasReservaHistoricas]
+        .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))[0]?.fecha || null;
+
       const reservaIdsDelCombustible = new Set([
         ...comprasReservaHistoricas.map(m => m.consumidor_id).filter(Boolean),
         ...despachosReservaHistoricos.map(m => m.consumidor_origen_id).filter(Boolean),
@@ -217,8 +222,9 @@ export default function Dashboard() {
         montoTotalDisponibleReserva,
         detalleConsumoReserva,
         detalleConsumo,
+        ultimaCargaReservaFecha,
       };
-    }).filter(r => r.litrosCompras > 0 || r.litrosConsumo > 0 || r.litrosInicio > 0);
+    }).filter(r => r.litrosCompras > 0 || r.litrosConsumo > 0 || r.litrosInicio > 0 || r.litrosEnTanqueEstimado > 0);
   }, [movimientos, movimientosFiltrados, mesFiltro, tipoCombustible, tarjetasById, consumidoresReservaIds, consumidores]);
 
   // Resumen del mes
@@ -291,6 +297,16 @@ export default function Dashboard() {
   const movimientosFiltradosOrdenados = useMemo(
     () => [...movimientosFiltrados].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))),
     [movimientosFiltrados]
+  );
+
+  const choferDelMes = useMemo(
+    () => computeChoferDelMes({ month: mesFiltro, movimientos, conductores }),
+    [mesFiltro, movimientos, conductores],
+  );
+
+  const equipoStats = useMemo(
+    () => computeEquipoStats({ consumidores, movimientos, month: mesFiltro }),
+    [consumidores, movimientos, mesFiltro],
   );
 
   const modalDataPorCard = useMemo(() => {
@@ -393,6 +409,32 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Personal del mes */}
+      {choferDelMes && (
+        <div>
+          <SectionTitle icon={User} title="Personal del mes" iconColor="text-amber-500" />
+          <Card className="border-0 shadow-sm bg-amber-50/30 ring-1 ring-amber-100">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                <User className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-800">{choferDelMes.conductor.nombre}</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {choferDelMes.litros.toFixed(1)} L · {choferDelMes.movimientos} movimientos válidos
+                </p>
+                {choferDelMes.conductor.vehiculo_asignado_chapa && (
+                  <p className="text-xs text-slate-400">Vehículo: {choferDelMes.conductor.vehiculo_asignado_chapa}</p>
+                )}
+              </div>
+              <Badge variant="outline" className="ml-auto shrink-0 bg-amber-100 text-amber-700 border-amber-200 text-[11px]">
+                ⭐ Chofer del mes
+              </Badge>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Resumen por combustible */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -412,9 +454,14 @@ export default function Dashboard() {
               return (
                 <Card key={res.nombreCombustible} className="border border-slate-200 shadow-sm">
                   <CardContent className="p-3 space-y-2">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <h3 className="text-sm font-bold">{res.nombreCombustible}</h3>
-                      <Badge variant="outline" className="text-[10px]">Precio {formatMoneySymbol(res.precioRef, res.moneda)}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px]">Precio {formatMoneySymbol(res.precioRef, res.moneda)}</Badge>
+                        {res.ultimaCargaReservaFecha && (
+                          <span className="text-[10px] text-slate-400">Última carga: {res.ultimaCargaReservaFecha}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="rounded-md bg-slate-50 p-2">
@@ -437,6 +484,14 @@ export default function Dashboard() {
                         <p className="text-emerald-700">{formatMoneySymbol(saldoReservaMonto, res.moneda)}</p>
                       </div>
                     </div>
+                    <div className="flex justify-end pt-1">
+                      <Link
+                        to={`${createPageUrl('Movimientos')}?combustible=${encodeURIComponent(res.nombreCombustible)}`}
+                        className="text-[11px] text-sky-600 hover:underline"
+                      >
+                        Ver movimientos de {res.nombreCombustible} →
+                      </Link>
+                    </div>
                   </CardContent>
                 </Card>
               );
@@ -445,9 +500,9 @@ export default function Dashboard() {
         )}
       </div>
 
-      <Dialog open={statModal.open} onOpenChange={(open) => setStatModal(s => ({ ...s, open }))}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
+      <Dialog open={statModal.open} onOpenChange={(open) => { setStatModal(s => ({ ...s, open })); setModalGrupoIdx(0); }}>
+        <DialogContent className="max-w-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-slate-100">
             <DialogTitle className="text-base">
               {statModal.tipo === 'gasto' && 'Detalle de gasto por combustible'}
               {statModal.tipo === 'litros' && 'Detalle de litros por combustible'}
@@ -455,36 +510,94 @@ export default function Dashboard() {
               {statModal.tipo === 'alertas' && 'Alertas críticas por combustible'}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {modalDataPorCard.length > 0 ? modalDataPorCard.map((grupo) => (
-              <details key={`modal-${statModal.tipo}-${grupo.combustible}`} className="border rounded-lg px-3 py-2">
-                <summary className="cursor-pointer text-sm font-semibold flex justify-between">
-                  <span>{grupo.combustible}</span>
-                  <span>{grupo.movimientos.length} operaciones</span>
-                </summary>
-                <div className="mt-2 space-y-2 max-h-52 overflow-y-auto pr-1">
-                  {grupo.movimientos.map((m) => (
-                    <div key={m.id} className="text-xs border-b pb-1">
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium">{m.consumidor_nombre || m.vehiculo_chapa || 'Sin consumidor'}</span>
-                        <span>{m.fecha || 'Sin fecha'}</span>
+
+          {modalDataPorCard.length === 0 ? (
+            <p className="text-sm text-slate-500 px-5 py-8 text-center">No hay operaciones para el período.</p>
+          ) : (
+            <div className="flex h-[62vh]">
+              {/* Panel izquierdo: lista de combustibles */}
+              <div className="w-44 shrink-0 border-r border-slate-100 overflow-y-auto py-2">
+                {modalDataPorCard.map((grupo, idx) => (
+                  <button
+                    key={grupo.combustible}
+                    onClick={() => setModalGrupoIdx(idx)}
+                    className={`w-full text-left px-4 py-3 transition-colors ${
+                      idx === modalGrupoIdx
+                        ? 'bg-sky-50 border-r-2 border-sky-500'
+                        : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <p className={`text-sm font-semibold truncate ${idx === modalGrupoIdx ? 'text-sky-700' : 'text-slate-700'}`}>
+                      {grupo.combustible}
+                    </p>
+                    <p className={`text-[11px] mt-0.5 ${idx === modalGrupoIdx ? 'text-sky-500' : 'text-slate-400'}`}>
+                      {grupo.movimientos.length} ops
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Panel derecho: movimientos del grupo seleccionado */}
+              {(() => {
+                const grupo = modalDataPorCard[modalGrupoIdx];
+                if (!grupo) return null;
+                const totalLitros = grupo.movimientos.reduce((s, m) => s + (m.litros || 0), 0);
+                const totalMonto = grupo.movimientos.reduce((s, m) => s + (m.monto || 0), 0);
+                return (
+                  <div className="flex-1 flex flex-col min-w-0">
+                    {/* Cabecera del panel */}
+                    <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3 shrink-0">
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">{grupo.combustible}</p>
+                        <p className="text-[11px] text-slate-400">{grupo.movimientos.length} operaciones</p>
                       </div>
-                      <div className="flex justify-between gap-2 text-slate-600">
-                        <span>{m.tipo} · {(m.litros || 0).toFixed(1)} L · {formatMoneySymbol(m.monto || 0, 'USD')}</span>
-                        <Link
-                          to={`${createPageUrl('Movimientos')}?movimientoId=${m.id}`}
-                          className="text-sky-600 hover:underline"
-                          onClick={() => setStatModal({ open: false, tipo: null })}
-                        >
-                          Ver movimiento
-                        </Link>
+                      <div className="flex gap-3 text-right">
+                        {totalLitros > 0 && (
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase">Litros</p>
+                            <p className="text-sm font-bold text-orange-600">{totalLitros.toFixed(1)} L</p>
+                          </div>
+                        )}
+                        {totalMonto > 0 && (
+                          <div>
+                            <p className="text-[10px] text-slate-400 uppercase">Monto</p>
+                            <p className="text-sm font-bold text-slate-700">{formatMoneySymbol(totalMonto)}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </details>
-            )) : <p className="text-sm text-slate-500">No hay operaciones para el período.</p>}
-          </div>
+                    {/* Lista de movimientos */}
+                    <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
+                      {grupo.movimientos.map((m) => (
+                        <div key={m.id} className="px-4 py-2.5 hover:bg-slate-50/60 transition-colors">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-800 truncate leading-snug">
+                              {m.consumidor_nombre || m.vehiculo_chapa || 'Sin consumidor'}
+                            </p>
+                            <span className="text-[11px] text-slate-400 shrink-0">{m.fecha}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-0.5">
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{m.tipo}</Badge>
+                              {(m.litros || 0) > 0 && <span>{(m.litros).toFixed(1)} L</span>}
+                              {(m.monto || 0) > 0 && <span>{formatMoneySymbol(m.monto)}</span>}
+                            </div>
+                            <Link
+                              to={`${createPageUrl('Movimientos')}?movimientoId=${m.id}`}
+                              className="text-[11px] text-sky-600 hover:underline shrink-0"
+                              onClick={() => { setStatModal({ open: false, tipo: null }); setModalGrupoIdx(0); }}
+                            >
+                              Ver →
+                            </Link>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -499,6 +612,38 @@ export default function Dashboard() {
               <span className="text-red-600 text-xs">— consumo crítico en la última carga</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Equipo / Generadores */}
+      {equipoStats.length > 0 && (
+        <div>
+          <SectionTitle icon={Zap} title="Equipo / Generadores" iconColor="text-yellow-500" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {equipoStats.map(({ equipo, litrosMes, ultimaCargaFecha, combustible }) => (
+              <Card key={equipo.id} className="border-0 shadow-sm">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-700 truncate">{equipo.nombre}</p>
+                      {equipo.responsable && <p className="text-xs text-slate-400">{equipo.responsable}</p>}
+                    </div>
+                    <Badge variant="outline" className="text-[10px] shrink-0 border-orange-200 text-orange-700">{combustible}</Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-md bg-slate-50 p-2">
+                      <p className="text-slate-400">Litros del mes</p>
+                      <p className="font-semibold">{litrosMes > 0 ? `${litrosMes.toFixed(1)} L` : 'Sin datos'}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-2">
+                      <p className="text-slate-400">Última carga</p>
+                      <p className="font-semibold">{ultimaCargaFecha || 'Sin datos'}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 
