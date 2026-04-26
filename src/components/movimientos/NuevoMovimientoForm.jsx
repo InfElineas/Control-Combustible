@@ -10,9 +10,11 @@ import { toast } from "sonner";
 import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Save, Loader2, Gauge } from 'lucide-react';
 import { obtenerPrecioVigente, calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { calcularAuditoriaCompra, obtenerCapacidadTanque, AUDITORIA_ESTADO } from './auditoriaCombustible';
+import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 export default function NuevoMovimientoForm({ onSuccess }) {
   const queryClient = useQueryClient();
+  const { canRecargar, canComprarDespachar } = useUserRole();
 
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
@@ -24,7 +26,24 @@ export default function NuevoMovimientoForm({ onSuccess }) {
   // Keep legacy vehiculos for backward compat in DESPACHO origen
   const { data: vehiculos = [] } = useQuery({ queryKey: ['vehiculos'], queryFn: () => base44.entities.Vehiculo.list() });
 
+  // Tipos de movimiento que el rol actual puede registrar
+  const tiposPermitidos = useMemo(() => {
+    const all = [
+      { value: 'RECARGA',  label: 'Recarga',  Icon: ArrowUpCircle,   activeClass: 'data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700' },
+      { value: 'COMPRA',   label: 'Compra',   Icon: ArrowDownCircle, activeClass: 'data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700' },
+      { value: 'DESPACHO', label: 'Despacho', Icon: ArrowLeftRight,  activeClass: 'data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700' },
+    ];
+    return all.filter(t => t.value === 'RECARGA' ? canRecargar : canComprarDespachar);
+  }, [canRecargar, canComprarDespachar]);
+
   const [tipo, setTipo] = useState('COMPRA');
+
+  // Ajustar tipo si el rol cargado no lo permite (ej. economico no puede COMPRA)
+  useEffect(() => {
+    if (tiposPermitidos.length > 0 && !tiposPermitidos.find(t => t.value === tipo)) {
+      setTipo(tiposPermitidos[0].value);
+    }
+  }, [tiposPermitidos]);
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
     tarjeta_id: '',
@@ -68,6 +87,23 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     return consumidoresActivos.filter(c => c.tipo_consumidor_id === filtroTipoConsumidor);
   }, [consumidoresActivos, filtroTipoConsumidor]);
 
+  // Para COMPRA: excluir tanques/reservas/almacén de uso (solo vehículos/equipos)
+  const esAlmacenamientoConsumidor = (c) => {
+    const n = (c.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('tanque') || n.includes('reserva') || n.includes('almac');
+  };
+  // Para DESPACHO destino: solo excluir tanques/reservas (almacén de uso sí puede recibir despacho)
+  const esTanqueOReserva = (c) => {
+    const n = (c.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('tanque') || n.includes('reserva');
+  };
+  const consumidoresParaCompra = useMemo(() =>
+    consumidoresFiltradosPorTipo.filter(c => !esAlmacenamientoConsumidor(c)),
+  [consumidoresFiltradosPorTipo]);
+  const consumidoresParaDespachoDestino = useMemo(() =>
+    consumidoresFiltradosPorTipo.filter(c => !esTanqueOReserva(c)),
+  [consumidoresFiltradosPorTipo]);
+
   const combustiblesPermitidosConsumidor = useMemo(() => {
     const consumidor = consumidores.find(c => c.id === form.consumidor_id);
     return resolverCombustiblesConsumidor(consumidor);
@@ -103,10 +139,10 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     return obtenerPrecioVigente(precios, form.combustible_id, form.fecha);
   }, [form.combustible_id, form.fecha, precios]);
 
-  const litrosCalculados = useMemo(() => {
-    if (tipo !== 'COMPRA' || !precioVigente || !form.monto) return null;
-    return parseFloat(form.monto) / precioVigente;
-  }, [tipo, precioVigente, form.monto]);
+  const montoCalculado = useMemo(() => {
+    if (tipo !== 'COMPRA' || !precioVigente || !form.litros) return null;
+    return parseFloat(form.litros) * precioVigente;
+  }, [tipo, precioVigente, form.litros]);
 
   // Consumidor seleccionado y su tipo
   const consumidorSeleccionado = consumidores.find(c => c.id === form.consumidor_id);
@@ -137,11 +173,10 @@ export default function NuevoMovimientoForm({ onSuccess }) {
 
   const ultimoOdometro = ultimoMovConOdometro?.odometro ?? null;
 
-  // Litros reales: si se ingresaron manualmente (COMPRA con litros) o calculados por precio
   const litrosReales = useMemo(() => {
-    if (form.litros && parseFloat(form.litros) > 0) return parseFloat(form.litros);
-    return litrosCalculados;
-  }, [form.litros, litrosCalculados]);
+    if (!form.litros || parseFloat(form.litros) <= 0) return null;
+    return parseFloat(form.litros);
+  }, [form.litros]);
 
   // Km recorridos y consumo real calculado
   const kmRecorridos = useMemo(() => {
@@ -215,6 +250,16 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       toast.success('Movimiento registrado correctamente');
       onSuccess?.();
     },
+    onError: (error) => {
+      const msg = (error?.message || '').toLowerCase();
+      if (msg.includes('permission') || msg.includes('denied') || msg.includes('policy')) {
+        toast.error('Sin permiso para esta operación');
+      } else if (msg.includes('duplicate') || msg.includes('unique')) {
+        toast.error('El registro ya existe');
+      } else {
+        toast.error('Error al registrar. Intente nuevamente.');
+      }
+    },
   });
 
   const set = (field, value) => {
@@ -229,32 +274,39 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       if (!form.tarjeta_id) e.tarjeta_id = 'Seleccione tarjeta';
       if (!form.consumidor_id) e.consumidor_id = 'Seleccione consumidor';
       if (!form.combustible_id) e.combustible_id = 'Seleccione combustible';
-      if (!form.monto || parseFloat(form.monto) <= 0) e.monto = 'Monto > 0';
+      const litrosCompra = parseFloat(form.litros);
+      if (!form.litros || isNaN(litrosCompra) || !isFinite(litrosCompra) || litrosCompra <= 0) e.litros = 'Litros debe ser mayor a 0';
+      else if (litrosCompra > 50000) e.litros = 'Valor excede el máximo permitido (50 000 L)';
       if (!precioVigente) e.combustible_id = 'Sin precio vigente para esta fecha';
-      if (saldoTarjeta != null && parseFloat(form.monto) > 0 && parseFloat(form.monto) > saldoTarjeta) {
-        e.monto = `Saldo insuficiente. Disponible: ${formatMonto(saldoTarjeta)}`;
-      }
       if (requiereOdometro) {
-        if (!form.odometro || parseFloat(form.odometro) <= 0) {
+        if (form.odometro === '' || form.odometro === null || form.odometro === undefined) {
           e.odometro = 'El odómetro actual es obligatorio';
+        } else if (parseFloat(form.odometro) < 0) {
+          e.odometro = 'El odómetro no puede ser negativo';
         } else if (ultimoOdometro != null && parseFloat(form.odometro) <= ultimoOdometro) {
           e.odometro = `Debe ser mayor al registro anterior: ${ultimoOdometro.toLocaleString()} km`;
         }
       }
       if (auditoriaCompra?.estado === AUDITORIA_ESTADO.EXCESO && capacidadTanque != null) {
-        e.monto = `Excede capacidad de tanque (${capacidadTanque.toFixed(2)} L) según estimación.`;
+        e.litros = `Excede capacidad de tanque (${capacidadTanque.toFixed(2)} L) según estimación.`;
       }
     } else if (tipo === 'RECARGA') {
       if (!form.tarjeta_id) e.tarjeta_id = 'Seleccione tarjeta';
-      if (!form.monto || parseFloat(form.monto) <= 0) e.monto = 'Monto > 0';
+      const montoVal = parseFloat(form.monto);
+      if (!form.monto || isNaN(montoVal) || !isFinite(montoVal) || montoVal <= 0) e.monto = 'Monto debe ser mayor a 0';
+      else if (montoVal > 10000000) e.monto = 'Monto excede el máximo permitido';
     } else if (tipo === 'DESPACHO') {
       if (!form.consumidor_origen_id) e.consumidor_origen_id = 'Seleccione origen (reserva)';
       if (!form.consumidor_id) e.consumidor_id = 'Seleccione consumidor destino';
       if (!form.combustible_id) e.combustible_id = 'Seleccione combustible';
-      if (!form.litros || parseFloat(form.litros) <= 0) e.litros = 'Litros > 0';
+      const litrosDespacho = parseFloat(form.litros);
+      if (!form.litros || isNaN(litrosDespacho) || !isFinite(litrosDespacho) || litrosDespacho <= 0) e.litros = 'Litros debe ser mayor a 0';
+      else if (litrosDespacho > 50000) e.litros = 'Valor excede el máximo permitido (50 000 L)';
       if (requiereOdometro) {
-        if (!form.odometro || parseFloat(form.odometro) <= 0) {
+        if (form.odometro === '' || form.odometro === null || form.odometro === undefined) {
           e.odometro = 'El odómetro actual es obligatorio para este consumidor';
+        } else if (parseFloat(form.odometro) < 0) {
+          e.odometro = 'El odómetro no puede ser negativo';
         } else if (ultimoOdometro != null && parseFloat(form.odometro) <= ultimoOdometro) {
           e.odometro = `Debe ser mayor al registro anterior: ${ultimoOdometro.toLocaleString()} km`;
         }
@@ -276,7 +328,8 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     if (tipo === 'COMPRA') {
       data.tarjeta_id = tarjeta.id;
       data.tarjeta_alias = tarjeta.alias || tarjeta.id_tarjeta;
-      data.monto = parseFloat(form.monto);
+      data.litros = parseFloat(form.litros);
+      data.monto = montoCalculado ?? null;
       data.consumidor_id = consumidor.id;
       data.consumidor_nombre = consumidor.nombre;
       // legado para compatibilidad
@@ -285,7 +338,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       data.combustible_id = combustible.id;
       data.combustible_nombre = combustible.nombre;
       data.precio = precioVigente;
-      data.litros = litrosCalculados;
       data.remanente_estimado_antes = auditoriaCompra?.remanenteAntes ?? null;
       data.combustible_estimado_post = auditoriaCompra?.combustibleEstimadoPost ?? null;
       data.capacidad_tanque = capacidadTanque;
@@ -319,19 +371,21 @@ export default function NuevoMovimientoForm({ onSuccess }) {
 
   return (
     <div className="space-y-4">
-      <Tabs value={tipo} onValueChange={v => { setTipo(v); setErrors({}); }}>
-        <TabsList className="w-full grid grid-cols-3 h-11">
-          <TabsTrigger value="RECARGA" className="gap-1.5 text-xs data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700">
-            <ArrowUpCircle className="w-3.5 h-3.5" /> Recarga
-          </TabsTrigger>
-          <TabsTrigger value="COMPRA" className="gap-1.5 text-xs data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700">
-            <ArrowDownCircle className="w-3.5 h-3.5" /> Compra
-          </TabsTrigger>
-          <TabsTrigger value="DESPACHO" className="gap-1.5 text-xs data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700">
-            <ArrowLeftRight className="w-3.5 h-3.5" /> Despacho
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {tiposPermitidos.length > 1 ? (
+        <Tabs value={tipo} onValueChange={v => { setTipo(v); setErrors({}); }}>
+          <TabsList className={`w-full grid h-11 ${{ 2: 'grid-cols-2', 3: 'grid-cols-3' }[tiposPermitidos.length] ?? 'grid-cols-3'}`}>
+            {tiposPermitidos.map(({ value, label, Icon, activeClass }) => (
+              <TabsTrigger key={value} value={value} className={`gap-1.5 text-xs ${activeClass}`}>
+                <Icon className="w-3.5 h-3.5" /> {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      ) : tiposPermitidos.length === 1 ? (
+        <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-600 px-1">
+          {(() => { const { Icon, label } = tiposPermitidos[0]; return <><Icon className="w-4 h-4" /> {label}</> })()}
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         {/* Fecha */}
@@ -359,11 +413,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 Saldo actual: {formatMonto(saldoTarjeta, tarjetaSeleccionada?.moneda)}
               </p>
             )}
-            {tipo === 'COMPRA' && saldoTarjeta != null && saldoTarjeta <= 0 && (
-              <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-1">
-                <span className="font-semibold">⚠ Tarjeta sin saldo. Recargue antes de registrar compras.</span>
-              </div>
-            )}
           </div>
         )}
 
@@ -376,7 +425,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Filtrar tipo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {tiposConsumidor.filter(t => t.activo !== false).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
+                  {tiposConsumidor.filter(t => t.activo !== false && !esAlmacenamientoConsumidor({ tipo_consumidor_nombre: t.nombre })).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -385,7 +434,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               <Select value={form.consumidor_id} onValueChange={v => set('consumidor_id', v)}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar consumidor" /></SelectTrigger>
                 <SelectContent>
-                  {consumidoresFiltradosPorTipo.map(c => (
+                  {consumidoresParaCompra.map(c => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}{c.tipo_consumidor_nombre ? ` (${c.tipo_consumidor_nombre})` : ''}
                     </SelectItem>
@@ -413,14 +462,16 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               {precioVigente != null && <p className="text-xs text-slate-400 mt-1">Precio vigente: {formatMonto(precioVigente)}/L</p>}
             </div>
             <div>
-              <Label className="text-xs text-slate-500">Monto</Label>
-              <Input type="number" step="0.01" min="0.01" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="0.00" className="mt-1" />
-              {errors.monto && <p className="text-xs text-red-500 mt-1">{errors.monto}</p>}
+              <Label className="text-xs text-slate-500">Litros</Label>
+              <Input type="number" step="0.01" min="0.01" value={form.litros} onChange={e => set('litros', e.target.value)} placeholder="0.00" className="mt-1" />
+              {errors.litros && <p className="text-xs text-red-500 mt-1">{errors.litros}</p>}
             </div>
-            <div className="bg-slate-50 rounded-xl p-3 flex justify-between items-center">
-              <span className="text-sm text-slate-500">Litros equivalentes</span>
-              <span className="text-lg font-bold text-slate-800">{litrosCalculados != null ? `${litrosCalculados.toFixed(2)} L` : '—'}</span>
-            </div>
+            {montoCalculado != null && (
+              <div className="bg-slate-50 rounded-xl p-3 flex justify-between items-center">
+                <span className="text-sm text-slate-500">Monto estimado</span>
+                <span className="text-lg font-bold text-slate-800">{formatMonto(montoCalculado, tarjetaSeleccionada?.moneda)}</span>
+              </div>
+            )}
             {auditoriaCompra && (
               <div className={`rounded-xl p-3 border text-xs space-y-1 ${
                 auditoriaCompra.estado === AUDITORIA_ESTADO.EXCESO
@@ -437,8 +488,8 @@ export default function NuevoMovimientoForm({ onSuccess }) {
             )}
 
             {/* Odómetro - requerido solo para tipos que lo necesitan */}
-            <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 bg-red-50/30' : 'border-sky-100 bg-sky-50/40'}`}>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700">
+            <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 dark:border-red-800/60 bg-red-50/30 dark:bg-red-900/20' : 'border-sky-100 dark:border-sky-800/50 bg-sky-50/40 dark:bg-sky-900/20'}`}>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
                 <Gauge className="w-3.5 h-3.5" />
                 Odómetro actual {requiereOdometro && <span className="text-red-400">*</span>}
                 {ultimoOdometro != null && (
@@ -523,7 +574,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Filtrar tipo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {tiposConsumidor.filter(t => t.activo !== false).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
+                  {tiposConsumidor.filter(t => t.activo !== false && !esTanqueOReserva({ tipo_consumidor_nombre: t.nombre })).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -532,7 +583,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               <Select value={form.consumidor_id} onValueChange={v => set('consumidor_id', v)}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar destino" /></SelectTrigger>
                 <SelectContent>
-                  {consumidoresFiltradosPorTipo.filter(c => c.id !== form.consumidor_origen_id).map(c => (
+                  {consumidoresParaDespachoDestino.filter(c => c.id !== form.consumidor_origen_id).map(c => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
                     </SelectItem>

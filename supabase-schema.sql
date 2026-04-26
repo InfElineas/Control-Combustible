@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
   email        text,
   full_name    text,
   role         text NOT NULL DEFAULT 'auditor'
-                    CHECK (role IN ('superadmin', 'operador', 'auditor')),
+                    CHECK (role IN ('superadmin', 'operador', 'auditor', 'economico')),
   created_date timestamptz DEFAULT now(),
   UNIQUE(user_id)
 );
@@ -151,26 +151,82 @@ CREATE TABLE IF NOT EXISTS config_alerta (
 
 -- ============================================================
 -- ROW LEVEL SECURITY
--- La autorización por rol se gestiona en la app (Layout.jsx).
--- Aquí solo exigimos que el usuario esté autenticado.
 -- ============================================================
-ALTER TABLE user_roles        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tipo_consumidor   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tipo_combustible  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tarjeta           ENABLE ROW LEVEL SECURITY;
-ALTER TABLE vehiculo          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE conductor         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE consumidor        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tipo_consumidor    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tipo_combustible   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tarjeta            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vehiculo           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conductor          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consumidor         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE precio_combustible ENABLE ROW LEVEL SECURITY;
-ALTER TABLE movimiento        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE config_alerta     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE movimiento         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE config_alerta      ENABLE ROW LEVEL SECURITY;
 
--- user_roles: cualquier usuario autenticado puede leer/crear su propia fila;
---             solo superadmin gestiona roles (vía dashboard de Supabase o service key)
-CREATE POLICY "authenticated_all" ON user_roles
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- ── Helper: devuelve el rol del usuario autenticado actual ────────────────────
+CREATE OR REPLACE FUNCTION get_my_role()
+RETURNS text LANGUAGE sql SECURITY DEFINER STABLE AS $$
+  SELECT role FROM user_roles WHERE user_id = auth.uid()
+$$;
 
--- Resto de tablas: acceso completo para usuarios autenticados
+-- ── user_roles ────────────────────────────────────────────────────────────────
+-- SELECT: cualquier autenticado (admin panel necesita ver todos)
+-- INSERT: solo el propio usuario (auto-creación en primer login)
+-- UPDATE: solo superadmin puede cambiar roles ajenos
+-- DELETE: solo superadmin
+DROP POLICY IF EXISTS "authenticated_all"            ON user_roles;
+DROP POLICY IF EXISTS "user_roles_select"            ON user_roles;
+DROP POLICY IF EXISTS "user_roles_insert_self"       ON user_roles;
+DROP POLICY IF EXISTS "user_roles_update_superadmin" ON user_roles;
+DROP POLICY IF EXISTS "user_roles_delete_superadmin" ON user_roles;
+
+CREATE POLICY "user_roles_select" ON user_roles
+  FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "user_roles_insert_self" ON user_roles
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "user_roles_update_superadmin" ON user_roles
+  FOR UPDATE TO authenticated
+  USING    (get_my_role() = 'superadmin')
+  WITH CHECK (get_my_role() = 'superadmin');
+
+CREATE POLICY "user_roles_delete_superadmin" ON user_roles
+  FOR DELETE TO authenticated
+  USING (get_my_role() = 'superadmin');
+
+-- ── movimiento ────────────────────────────────────────────────────────────────
+-- SELECT: todos los autenticados
+-- INSERT: rol + tipo deben coincidir (operador→COMPRA/DESPACHO, economico→RECARGA)
+-- UPDATE: superadmin u operador
+-- DELETE: solo superadmin
+DROP POLICY IF EXISTS "authenticated_all" ON movimiento;
+DROP POLICY IF EXISTS "movimiento_select" ON movimiento;
+DROP POLICY IF EXISTS "movimiento_insert" ON movimiento;
+DROP POLICY IF EXISTS "movimiento_update" ON movimiento;
+DROP POLICY IF EXISTS "movimiento_delete" ON movimiento;
+
+CREATE POLICY "movimiento_select" ON movimiento
+  FOR SELECT TO authenticated USING (true);
+
+CREATE POLICY "movimiento_insert" ON movimiento
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    (tipo IN ('COMPRA', 'DESPACHO') AND get_my_role() IN ('superadmin', 'operador'))
+    OR
+    (tipo = 'RECARGA' AND get_my_role() IN ('superadmin', 'economico'))
+  );
+
+CREATE POLICY "movimiento_update" ON movimiento
+  FOR UPDATE TO authenticated
+  USING    (get_my_role() IN ('superadmin', 'operador'))
+  WITH CHECK (get_my_role() IN ('superadmin', 'operador'));
+
+CREATE POLICY "movimiento_delete" ON movimiento
+  FOR DELETE TO authenticated
+  USING (get_my_role() = 'superadmin');
+
+-- ── Resto de tablas: acceso completo para usuarios autenticados ───────────────
 CREATE POLICY "authenticated_all" ON tipo_consumidor
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
@@ -190,9 +246,6 @@ CREATE POLICY "authenticated_all" ON consumidor
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 CREATE POLICY "authenticated_all" ON precio_combustible
-  FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "authenticated_all" ON movimiento
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 CREATE POLICY "authenticated_all" ON config_alerta

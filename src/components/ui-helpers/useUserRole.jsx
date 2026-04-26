@@ -62,10 +62,11 @@ export function useUserRole() {
     };
   }, []);
 
-  const isSuperAdmin = role === 'superadmin';
-  const isOperador   = role === 'operador';
-  const isAuditor    = role === 'auditor';
-  const isAdmin      = isSuperAdmin;
+  const isSuperAdmin  = role === 'superadmin';
+  const isOperador    = role === 'operador';
+  const isAuditor     = role === 'auditor';
+  const isEconomico   = role === 'economico';
+  const isAdmin       = isSuperAdmin;
 
   return {
     user,
@@ -75,12 +76,18 @@ export function useUserRole() {
     isSuperAdmin,
     isOperador,
     isAuditor,
-    canWrite:           isSuperAdmin || isOperador,
-    canManageCatalogos: isSuperAdmin || isOperador,
-    canManageFlota:     isSuperAdmin || isOperador,
-    canImport:          isSuperAdmin || isOperador,
-    canViewReportes:    isSuperAdmin || isOperador || isAuditor,
-    canDelete:          isSuperAdmin,
-    canRead:            isSuperAdmin || isOperador || isAuditor,
+    isEconomico,
+    canWrite:            isSuperAdmin || isOperador,
+    canManageCatalogos:  isSuperAdmin || isOperador,
+    canManageFlota:      isSuperAdmin || isOperador,
+    canImport:           isSuperAdmin || isOperador,
+    canViewReportes:     isSuperAdmin || isOperador || isAuditor || isEconomico,
+    canDelete:           isSuperAdmin,
+    canRead:             isSuperAdmin || isOperador || isAuditor || isEconomico,
+    // Finanzas: recargas de tarjetas, precios, saldos
+    canManageFinanzas:   isSuperAdmin || isEconomico,
+    // Movimientos: qué tipos puede registrar cada rol
+    canRecargar:         isSuperAdmin || isEconomico,
+    canComprarDespachar: isSuperAdmin || isOperador,
   };
 }

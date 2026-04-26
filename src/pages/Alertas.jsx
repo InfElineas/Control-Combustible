@@ -8,8 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, Settings2, Mail, ChevronDown, ChevronUp, Send } from 'lucide-react';
+import { AlertTriangle, Settings2, Mail, ChevronDown, ChevronUp, Send, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import GraficoConsumoHistorico from '@/components/alertas/GraficoConsumoHistorico';
 
@@ -54,12 +53,13 @@ function AlertaRow({ consumidor, movimientos, config, onConfigEdit }) {
 
   const colorEstado = estado?.nivel === 'critico' ? 'text-red-600 bg-red-50 border-red-200'
     : estado?.nivel === 'alerta' ? 'text-amber-600 bg-amber-50 border-amber-200'
-    : 'text-emerald-600 bg-emerald-50 border-emerald-200';
+    : estado?.nivel === 'ok' ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+    : 'text-slate-500 bg-slate-100 border-slate-200 dark:bg-slate-700/50 dark:border-slate-600 dark:text-slate-400';
 
   const labelEstado = estado?.nivel === 'critico' ? 'Crítico'
     : estado?.nivel === 'alerta' ? 'Alerta'
     : estado?.nivel === 'ok' ? 'Normal'
-    : '—';
+    : 'Sin datos';
 
   return (
     <div className="border border-slate-100 rounded-xl overflow-hidden">
@@ -85,13 +85,12 @@ function AlertaRow({ consumidor, movimientos, config, onConfigEdit }) {
               {consumoRef && <p className="text-[10px] text-slate-400">ref: {consumoRef.toFixed(2)}</p>}
             </div>
           )}
-          {estado && (
-            <Badge className={`text-[10px] border ${colorEstado}`}>
-              {estado.nivel !== 'ok' && <AlertTriangle className="w-2.5 h-2.5 mr-1" />}
-              {labelEstado}
-              {estado.nivel !== 'ok' && <span className="ml-1">({estado.desv.toFixed(0)}%)</span>}
-            </Badge>
-          )}
+          <Badge variant="outline" className={`text-[10px] border ${colorEstado}`}>
+            {estado == null && <HelpCircle className="w-2.5 h-2.5 mr-1" />}
+            {estado != null && estado.nivel !== 'ok' && <AlertTriangle className="w-2.5 h-2.5 mr-1" />}
+            {labelEstado}
+            {estado != null && estado.nivel !== 'ok' && <span className="ml-1">({estado.desv.toFixed(0)}%)</span>}
+          </Badge>
           {config?.alerta_email && config?.email_destino && estado?.nivel === 'critico' && (
             <Button
               variant="ghost" size="icon"
@@ -272,9 +271,22 @@ export default function Alertas() {
   const normales = consumidoresConEstado.filter(c => c.estado?.nivel === 'ok');
   const sinDatos = consumidoresConEstado.filter(c => !c.estado);
 
-  const listaFiltrada = tab === 'criticos' ? [...criticos, ...enAlerta]
-    : tab === 'normales' ? normales
-    : consumidoresConEstado;
+  const sections = useMemo(() => {
+    if (tab === 'normales') return normales.length ? [{ title: '', color: '', items: normales }] : [];
+    const groups = tab === 'criticos'
+      ? [
+          { title: 'Crítico',   color: 'text-red-500',    items: criticos  },
+          { title: 'En alerta', color: 'text-amber-500',  items: enAlerta  },
+          { title: 'Sin datos', color: 'text-slate-400',  items: sinDatos  },
+        ]
+      : [
+          { title: 'Crítico',   color: 'text-red-500',    items: criticos  },
+          { title: 'En alerta', color: 'text-amber-500',  items: enAlerta  },
+          { title: 'Sin datos', color: 'text-slate-400',  items: sinDatos  },
+          { title: 'Normal',    color: 'text-emerald-500',items: normales  },
+        ];
+    return groups.filter(g => g.items.length > 0);
+  }, [tab, criticos, enAlerta, sinDatos, normales]);
 
   return (
     <div className="space-y-5">
@@ -303,39 +315,62 @@ export default function Alertas() {
             <p className="text-2xl font-bold mt-1 text-emerald-500">{normales.length}</p>
           </CardContent>
         </Card>
-        <Card className="border-0 shadow-sm">
+        <Card className={`border-0 shadow-sm ${sinDatos.length > 0 ? 'ring-1 ring-slate-200' : ''}`}>
           <CardContent className="p-4">
             <p className="text-[11px] text-slate-400 uppercase tracking-wide">Sin datos</p>
-            <p className="text-2xl font-bold mt-1 text-slate-300">{sinDatos.length}</p>
+            <p className={`text-2xl font-bold mt-1 ${sinDatos.length > 0 ? 'text-slate-500' : 'text-slate-300'}`}>{sinDatos.length}</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Filtro rápido */}
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="w-full grid grid-cols-3">
-          <TabsTrigger value="todas" className="text-xs">Todos ({consumidoresConEstado.length})</TabsTrigger>
-          <TabsTrigger value="criticos" className="text-xs gap-1">
-            {(criticos.length + enAlerta.length) > 0 && <AlertTriangle className="w-3 h-3" />}
-            Con alertas ({criticos.length + enAlerta.length})
-          </TabsTrigger>
-          <TabsTrigger value="normales" className="text-xs">Normales ({normales.length})</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex gap-0.5 flex-wrap border-b border-slate-200 dark:border-slate-700">
+        {[
+          { value: 'todas',   label: `Todos (${consumidoresConEstado.length})` },
+          { value: 'criticos', label: `Con alertas (${criticos.length + enAlerta.length + sinDatos.length})`, alert: (criticos.length + enAlerta.length + sinDatos.length) > 0 },
+          { value: 'normales', label: `Normales (${normales.length})` },
+        ].map(({ value, label, alert }) => (
+          <button
+            key={value}
+            onClick={() => setTab(value)}
+            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-t border-b-2 transition-colors -mb-px ${
+              tab === value
+                ? 'border-sky-500 text-sky-700 dark:text-sky-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+          >
+            {alert && <AlertTriangle className="w-3 h-3" />}
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* Lista */}
-      <div className="space-y-2">
-        {listaFiltrada.length === 0 && (
+      <div className="space-y-5">
+        {sections.length === 0 && (
           <p className="text-sm text-slate-400 py-6 text-center">No hay consumidores en esta categoría</p>
         )}
-        {listaFiltrada.map(c => (
-          <AlertaRow
-            key={c.id}
-            consumidor={c}
-            movimientos={movimientos}
-            config={c.config}
-            onConfigEdit={setEditando}
-          />
+        {sections.map((section, i) => (
+          <div key={section.title ?? i}>
+            {section.title && (
+              <div className="flex items-center gap-2 px-1 mb-2">
+                <span className={`text-[10px] font-semibold uppercase tracking-widest ${section.color}`}>{section.title}</span>
+                <div className="flex-1 border-t border-slate-100 dark:border-slate-700/50" />
+                <span className="text-[10px] text-slate-400">{section.items.length}</span>
+              </div>
+            )}
+            <div className="space-y-2">
+              {section.items.map(c => (
+                <AlertaRow
+                  key={c.id}
+                  consumidor={c}
+                  movimientos={movimientos}
+                  config={c.config}
+                  onConfigEdit={setEditando}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 

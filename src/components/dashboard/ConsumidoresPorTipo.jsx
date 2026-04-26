@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Droplets } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertTriangle, ChevronDown, Droplets, Eye, Gauge, User } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
+import CombustibleBadge from '@/components/ui-helpers/CombustibleBadge';
 
 function getIconForTipo(nombre) {
   const n = nombre?.toLowerCase() || '';
@@ -15,6 +18,27 @@ function getIconForTipo(nombre) {
 function esTanque(consumidor) {
   const n = (consumidor.tipo_consumidor_nombre || '').toLowerCase();
   return n.includes('tanque') || n.includes('reserva');
+}
+
+// Consumidor de tipo "Uso de almacén" = autorizaciones ad-hoc (no vehículo, no tanque)
+function esAlmacenUso(consumidor) {
+  if (esTanque(consumidor)) return false;
+  const n = (consumidor.tipo_consumidor_nombre || '').toLowerCase();
+  return n.includes('almac');
+}
+
+function fuelColor(nombre) {
+  const n = (nombre || '').toLowerCase();
+  if (n.includes('diesel'))   return 'text-amber-600';
+  if (n.includes('especial')) return 'text-blue-600';
+  return 'text-emerald-600';
+}
+
+function abbrFuel(nombre) {
+  const n = (nombre || '').toLowerCase();
+  if (n.includes('gasolina') && n.includes('especial')) return 'G. Esp.';
+  if (n.includes('gasolina')) return 'Gasolina';
+  return nombre;
 }
 
 function StockBar({ pct }) {
@@ -37,181 +61,429 @@ function StockBar({ pct }) {
   );
 }
 
-function ConsumidorCard({ consumidor, movimientos, hoy }) {
-  const movsConsumidor = movimientos.filter(m =>
-    (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === consumidor.id
-  ).sort((a, b) => b.fecha?.localeCompare(a.fecha));
+function Stat({ label, children, className = '' }) {
+  return (
+    <div className={`rounded-md bg-slate-50 p-2 ${className}`}>
+      <p className="text-[10px] text-slate-400 mb-0.5 leading-none">{label}</p>
+      {children}
+    </div>
+  );
+}
 
-  const ultimoMov = movsConsumidor[0];
-  const diasSinAbast = ultimoMov
-    ? Math.floor((hoy - new Date(ultimoMov.fecha)) / (1000 * 60 * 60 * 24))
+function ConsumidorCard({ consumidor, movimientos, hoy }) {
+  const mesActual = hoy.toISOString().slice(0, 7);
+  const esTanqueConsumidor = esTanque(consumidor);
+  const [detallesOpen, setDetallesOpen] = useState(false);
+
+  // ── Compras ordenadas por fecha desc ──────────────────────────────────────
+  const compras = React.useMemo(() =>
+    movimientos
+      .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id)
+      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')),
+  [movimientos, consumidor.id]);
+
+  // ── Despachos recibidos (para "Uso de almacén" / Autorizo) ────────────────
+  const despachosRecibidos = React.useMemo(() =>
+    movimientos
+      .filter(m => m.tipo === 'DESPACHO' && m.consumidor_id === consumidor.id)
+      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')),
+  [movimientos, consumidor.id]);
+
+  const ultimaCarga = compras[0] ?? null;
+  const diasSinAbast = ultimaCarga
+    ? Math.floor((hoy - new Date(ultimaCarga.fecha + 'T00:00:00')) / 864e5)
     : null;
 
-  // Litros y gasto del mes actual
-  const mesActual = hoy.toISOString().slice(0, 7);
-  const comprasMes = movimientos.filter(m =>
-    m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id && m.fecha?.startsWith(mesActual)
-  );
-  const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
-  const gastoMes = comprasMes.reduce((s, m) => s + (m.monto || 0), 0);
+  // ── Mes actual ────────────────────────────────────────────────────────────
+  const comprasMes = React.useMemo(() =>
+    compras.filter(m => m.fecha?.startsWith(mesActual)),
+  [compras, mesActual]);
 
-  // Última carga (litros y monto)
-  const ultimaCompra = movimientos
-    .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id)
-    .sort((a, b) => b.fecha?.localeCompare(a.fecha))[0];
+  const litrosMes    = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
+  const gastoMes     = comprasMes.reduce((s, m) => s + (m.monto  || 0), 0);
+  const numCargasMes = comprasMes.length;
+  const kmMes        = comprasMes.reduce((s, m) => s + (m.km_recorridos || 0), 0);
 
-  // Consumo real - último registro con odómetro
-  const movsConConsumo = movimientos.filter(m =>
-    m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id && m.consumo_real != null
-  ).sort((a, b) => (b.odometro || 0) - (a.odometro || 0));
-  const ultimoConsumoReal = movsConConsumo[0]?.consumo_real ?? null;
-  const ultimoOdometro = movsConConsumo[0]?.odometro ?? null;
+  // ── Odómetro: lectura más alta (= más reciente) ───────────────────────────
+  const comprasConOdo = React.useMemo(() =>
+    [...compras.filter(m => m.odometro != null)]
+      .sort((a, b) => (b.odometro || 0) - (a.odometro || 0)),
+  [compras]);
 
-  // Referencia de consumo
-  const consumoRef = consumidor.datos_vehiculo?.indice_consumo_real
-    || consumidor.datos_vehiculo?.indice_consumo_fabricante
-    || null;
-  const umbralCritico = consumidor.datos_vehiculo?.umbral_critico_pct ?? 30;
-  const umbralAlerta = consumidor.datos_vehiculo?.umbral_alerta_pct ?? 15;
+  const ultimoOdometro      = comprasConOdo[0]?.odometro   ?? null;
+  const ultimoOdometroFecha = comprasConOdo[0]?.fecha       ?? null;
+  const ultimoConsumoReal   = comprasConOdo[0]?.consumo_real ?? null;
+
+  // ── Referencias de consumo ────────────────────────────────────────────────
+  const consumoRealRef    = consumidor.datos_vehiculo?.indice_consumo_real      ?? null;
+  const consumoFabricante = consumidor.datos_vehiculo?.indice_consumo_fabricante ?? null;
+  const consumoRef        = consumoRealRef || consumoFabricante || null;
+  const umbralCritico     = consumidor.datos_vehiculo?.umbral_critico_pct ?? 30;
+  const umbralAlerta      = consumidor.datos_vehiculo?.umbral_alerta_pct  ?? 15;
 
   let estadoConsumo = null;
+  let desvPct       = null;
   if (consumoRef && ultimoConsumoReal != null) {
-    const desv = ((consumoRef - ultimoConsumoReal) / consumoRef) * 100;
-    if (desv >= umbralCritico) estadoConsumo = 'critico';
-    else if (desv >= umbralAlerta) estadoConsumo = 'alerta';
+    desvPct = ((consumoRef - ultimoConsumoReal) / consumoRef) * 100;
+    if (desvPct >= umbralCritico) estadoConsumo = 'critico';
+    else if (desvPct >= umbralAlerta) estadoConsumo = 'alerta';
   }
 
-  // Stock para tanques (total entradas COMPRA - salidas DESPACHO como origen)
-  const esTanqueConsumidor = esTanque(consumidor);
+  // ── Estado vehículo ───────────────────────────────────────────────────────
+  const estadoVehiculo = consumidor.datos_vehiculo?.estado_vehiculo;
+  const estadoBadgeStyle = {
+    'En mantenimiento': 'border-amber-200 text-amber-700',
+    'Fuera de servicio': 'border-red-200 text-red-700',
+    'Baja': 'border-slate-300 text-slate-500',
+  }[estadoVehiculo] ?? null;
+
+  // ── Tanques: stock / cobertura / despacho ─────────────────────────────────
   const capacidad = consumidor.datos_tanque?.capacidad_litros || null;
+
   const stockActual = React.useMemo(() => {
     if (!esTanqueConsumidor) return null;
-    const stockInicial = Number(consumidor.litros_iniciales) || 0;
-    const entradas = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id)
-      .reduce((s, m) => s + (m.litros || 0), 0);
-    const salidas = movimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id)
-      .reduce((s, m) => s + (m.litros || 0), 0);
-    return Math.max(0, stockInicial + entradas - salidas);
+    const ini    = Number(consumidor.litros_iniciales) || 0;
+    const entras = movimientos.filter(m => m.tipo === 'COMPRA'   && m.consumidor_id        === consumidor.id).reduce((s, m) => s + (m.litros || 0), 0);
+    const sales  = movimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id).reduce((s, m) => s + (m.litros || 0), 0);
+    return Math.max(0, ini + entras - sales);
   }, [esTanqueConsumidor, movimientos, consumidor.id, consumidor.litros_iniciales]);
 
-  // Cobertura en días: promedio diario de consumo de los últimos 30 días de despacho
   const coberturaDias = React.useMemo(() => {
     if (!esTanqueConsumidor || stockActual == null) return null;
-    const hace30 = new Date(hoy); hace30.setDate(hace30.getDate() - 30);
-    const hace30Str = hace30.toISOString().slice(0, 10);
-    const despachos30 = movimientos.filter(m =>
-      m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id && m.fecha >= hace30Str
-    );
-    const totalDespachadoL = despachos30.reduce((s, m) => s + (m.litros || 0), 0);
-    if (totalDespachadoL === 0) return null;
-    const promedioLDia = totalDespachadoL / 30;
-    return Math.floor(stockActual / promedioLDia);
+    const hace30Str = new Date(hoy.getTime() - 30 * 864e5).toISOString().slice(0, 10);
+    const total30   = movimientos
+      .filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id && m.fecha >= hace30Str)
+      .reduce((s, m) => s + (m.litros || 0), 0);
+    if (!total30) return null;
+    return Math.floor(stockActual / (total30 / 30));
   }, [esTanqueConsumidor, stockActual, movimientos, consumidor.id, hoy]);
 
-  const colorDias = diasSinAbast === null ? 'text-slate-400'
-    : diasSinAbast > 14 ? 'text-red-500'
-    : diasSinAbast > 7 ? 'text-amber-500'
-    : 'text-emerald-600';
-
-  const ringDias = diasSinAbast === null ? ''
-    : diasSinAbast > 14 ? 'ring-1 ring-red-100'
-    : diasSinAbast > 7 ? 'ring-1 ring-amber-100'
-    : '';
-
-  const ringConsumo = estadoConsumo === 'critico' ? 'ring-1 ring-red-200'
-    : estadoConsumo === 'alerta' ? 'ring-1 ring-amber-200'
-    : '';
+  const despachadoMes = React.useMemo(() => {
+    if (!esTanqueConsumidor) return 0;
+    return movimientos
+      .filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id && m.fecha?.startsWith(mesActual))
+      .reduce((s, m) => s + (m.litros || 0), 0);
+  }, [esTanqueConsumidor, movimientos, consumidor.id, mesActual]);
 
   const stockPct = capacidad && stockActual != null ? (stockActual / capacidad) * 100 : null;
 
-  return (
-    <Card className={`border-0 shadow-sm ${ringDias || ringConsumo}`}>
-      <CardContent className="p-3 space-y-2">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-base leading-none">{getIconForTipo(consumidor.tipo_consumidor_nombre)}</span>
+  // ── Estilos ───────────────────────────────────────────────────────────────
+  const ringCard = estadoConsumo === 'critico' ? 'ring-1 ring-red-200'
+    : estadoConsumo === 'alerta' ? 'ring-1 ring-amber-200'
+    : '';
+
+  const diasStyle = diasSinAbast === null ? 'bg-slate-50 text-slate-400'
+    : diasSinAbast > 30 ? 'bg-red-50 text-red-700'
+    : diasSinAbast > 14 ? 'bg-amber-50 text-amber-700'
+    : 'bg-emerald-50 text-emerald-700';
+
+  // ━━━━━━━━━━━━━━━━━━━━━━ TANQUE CARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  if (esTanqueConsumidor) {
+    return (
+      <Card className="border border-slate-200 shadow-sm">
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-700 truncate leading-tight">{consumidor.nombre}</p>
+              <p className="text-sm font-bold text-slate-800 truncate">{consumidor.nombre}</p>
               {consumidor.codigo_interno && (
-                <p className="text-[11px] text-slate-400 font-mono truncate">{consumidor.codigo_interno}</p>
+                <p className="text-[11px] text-slate-400 font-mono">{consumidor.codigo_interno}</p>
+              )}
+            </div>
+            {consumidor.combustible_nombre && (
+              <CombustibleBadge nombre={consumidor.combustible_nombre} className="shrink-0" />
+            )}
+          </div>
+
+          {stockActual != null && (
+            <div>
+              <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                <span className="flex items-center gap-1"><Droplets className="w-3 h-3 text-blue-400" />Stock actual</span>
+                <span className="font-bold text-slate-700">{stockActual.toFixed(1)} L{capacidad ? ` / ${capacidad} L` : ''}</span>
+              </div>
+              {capacidad && <StockBar pct={stockPct} />}
+              {coberturaDias != null && (
+                <p className={`text-[10px] mt-1 font-medium ${coberturaDias < 3 ? 'text-red-500' : coberturaDias < 7 ? 'text-amber-500' : 'text-emerald-600'}`}>
+                  Cobertura estimada: ~{coberturaDias} días
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-1.5 text-xs">
+            <Stat label="Último reaprov.">
+              {ultimaCarga ? (
+                <>
+                  <p className="font-semibold text-slate-700">{Number(ultimaCarga.litros || 0).toFixed(1)} L</p>
+                  <p className="text-[10px] text-slate-400">{ultimaCarga.fecha}</p>
+                </>
+              ) : <p className="text-slate-300">Sin datos</p>}
+            </Stat>
+            <Stat label="Despachado (mes)">
+              <p className="font-semibold text-slate-700">{despachadoMes > 0 ? `${despachadoMes.toFixed(1)} L` : '—'}</p>
+            </Stat>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━ USO DE ALMACÉN / AUTORIZO CARD ━━━━━━━━━━━━━━━━━━━━━
+  // Autorizaciones ad-hoc: reciben DESPACHO (no COMPRA); no tienen odómetro ni monto
+  if (esAlmacenUso(consumidor)) {
+    const despachosRecibidosMes = despachosRecibidos.filter(m => m.fecha?.startsWith(mesActual));
+    const ultimaAutorizacion    = despachosRecibidos[0] ?? null;
+    const litrosMesAlmacen      = despachosRecibidosMes.reduce((s, m) => s + (m.litros || 0), 0);
+    const numAlmacenMes         = despachosRecibidosMes.length;
+    const totalAutorizaciones   = despachosRecibidos.length;
+    const totalLitrosHistorico  = despachosRecibidos.reduce((s, m) => s + (m.litros || 0), 0);
+    const diasSinAutorizacion   = ultimaAutorizacion
+      ? Math.floor((hoy - new Date(ultimaAutorizacion.fecha + 'T00:00:00')) / 864e5)
+      : null;
+    const diasStyleAlmacen = diasSinAutorizacion === null ? 'bg-slate-50 text-slate-400'
+      : diasSinAutorizacion > 30 ? 'bg-red-50 text-red-700'
+      : diasSinAutorizacion > 14 ? 'bg-amber-50 text-amber-700'
+      : 'bg-emerald-50 text-emerald-700';
+
+    return (
+      <>
+      <Card className="border border-slate-200 shadow-sm border-l-4 border-l-violet-300">
+        <CardContent className="p-3 space-y-2">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-slate-800 truncate">{consumidor.nombre}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wide">Autorización de uso</p>
+            </div>
+            {consumidor.combustible_nombre && (
+              <CombustibleBadge nombre={consumidor.combustible_nombre} className="shrink-0" />
+            )}
+          </div>
+
+          {/* Última autorización */}
+          <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
+            <span className="text-slate-400 shrink-0">Última autorización</span>
+            {ultimaAutorizacion ? (
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <span className="text-slate-500 tabular-nums">{ultimaAutorizacion.fecha}</span>
+                {ultimaAutorizacion.combustible_nombre && (
+                  <CombustibleBadge nombre={ultimaAutorizacion.combustible_nombre} />
+                )}
+                <span className="font-semibold text-slate-700">{Number(ultimaAutorizacion.litros || 0).toFixed(1)} L</span>
+              </div>
+            ) : <span className="text-slate-300">Sin registros</span>}
+          </div>
+
+          {/* Stats: mes vs histórico */}
+          <div className="grid grid-cols-2 gap-1.5 text-xs">
+            <Stat label={`Este mes (${numAlmacenMes} autorización${numAlmacenMes !== 1 ? 'es' : ''})`}>
+              {numAlmacenMes > 0
+                ? <p className="font-semibold text-slate-700">{litrosMesAlmacen.toFixed(1)} L</p>
+                : <p className="text-slate-300 font-medium">Sin autorizaciones</p>}
+            </Stat>
+            <Stat label={`Histórico (${totalAutorizaciones} total)`}>
+              {totalAutorizaciones > 0
+                ? <p className="font-semibold text-slate-700">{totalLitrosHistorico.toFixed(1)} L</p>
+                : <p className="text-slate-300 font-medium">—</p>}
+            </Stat>
+          </div>
+
+          {/* Días desde última autorización */}
+          <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${diasStyleAlmacen}`}>
+            <span className="opacity-75">Desde última autorización</span>
+            <span className="font-bold tabular-nums">
+              {diasSinAutorizacion != null ? `${diasSinAutorizacion} días` : '—'}
+            </span>
+          </div>
+
+          {/* Botón ver detalles */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-7 text-xs text-violet-600 border-violet-200 hover:bg-violet-50 dark:border-violet-800/50 dark:text-violet-400 dark:hover:bg-violet-900/20"
+            onClick={() => setDetallesOpen(true)}
+          >
+            <Eye className="w-3 h-3 mr-1.5" />
+            Ver autorizaciones ({totalAutorizaciones})
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Modal de autorizaciones */}
+      <Dialog open={detallesOpen} onOpenChange={setDetallesOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Autorizaciones — {consumidor.nombre}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto -mx-1 px-1">
+            {despachosRecibidos.length === 0 ? (
+              <p className="text-sm text-slate-400 py-6 text-center">Sin autorizaciones registradas</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-white dark:bg-slate-900">
+                  <tr className="border-b border-slate-100 dark:border-slate-700 text-[11px] text-slate-400 uppercase tracking-wide">
+                    <th className="text-left py-2 pr-3">Fecha</th>
+                    <th className="text-left py-2 pr-3">Combustible</th>
+                    <th className="text-right py-2 pr-3">Litros</th>
+                    <th className="text-left py-2 pr-2 hidden sm:table-cell">Origen</th>
+                    <th className="text-left py-2">Referencia</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                  {despachosRecibidos.map(m => (
+                    <tr key={m.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                      <td className="py-2 pr-3 text-slate-600 dark:text-slate-300 tabular-nums">{m.fecha}</td>
+                      <td className="py-2 pr-3">
+                        {m.combustible_nombre
+                          ? <CombustibleBadge nombre={m.combustible_nombre} />
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-right font-semibold text-slate-700 dark:text-slate-200 tabular-nums">
+                        {Number(m.litros || 0).toFixed(1)} L
+                      </td>
+                      <td className="py-2 pr-2 text-slate-500 dark:text-slate-400 hidden sm:table-cell max-w-[100px] truncate">
+                        {m.consumidor_origen_nombre || '—'}
+                      </td>
+                      <td className="py-2 text-slate-400 max-w-[80px] truncate">
+                        {m.referencia || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {despachosRecibidos.length > 0 && (
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex justify-between text-xs text-slate-500">
+              <span>{despachosRecibidos.length} autorización{despachosRecibidos.length !== 1 ? 'es' : ''}</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                Total: {despachosRecibidos.reduce((s, m) => s + (m.litros || 0), 0).toFixed(1)} L
+              </span>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      </>
+    );
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━ VEHÍCULO / EQUIPO CARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  return (
+    <Card className={`border border-slate-200 shadow-sm ${ringCard}`}>
+      <CardContent className="p-3 space-y-2">
+
+        {/* ── HEADER ── */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-bold text-slate-800 truncate leading-tight">{consumidor.nombre}</p>
+              {estadoConsumo && (
+                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${estadoConsumo === 'critico' ? 'text-red-500' : 'text-amber-500'}`} />
+              )}
+            </div>
+            <div className="flex items-center gap-1 flex-wrap mt-0.5">
+              {consumidor.codigo_interno && (
+                <span className="text-[11px] text-slate-400 font-mono">{consumidor.codigo_interno}</span>
+              )}
+              {(consumidor.conductor || consumidor.responsable) && (
+                <span className="text-[11px] text-slate-400 flex items-center gap-0.5">
+                  {consumidor.codigo_interno && <span className="mr-0.5">·</span>}
+                  <User className="w-2.5 h-2.5 inline" />
+                  {consumidor.conductor || consumidor.responsable}
+                </span>
               )}
             </div>
           </div>
-          {estadoConsumo && (
-            <AlertTriangle className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${estadoConsumo === 'critico' ? 'text-red-500' : 'text-amber-500'}`} />
-          )}
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            {consumidor.combustible_nombre && <CombustibleBadge nombre={consumidor.combustible_nombre} />}
+            {estadoBadgeStyle && (
+              <Badge variant="outline" className={`text-[10px] ${estadoBadgeStyle}`}>{estadoVehiculo}</Badge>
+            )}
+          </div>
         </div>
 
-        {/* Para tanques: stock visual */}
-        {esTanqueConsumidor && stockActual != null && (
-          <div>
-            <div className="flex justify-between text-[10px] text-slate-500 mb-0.5">
-              <span className="flex items-center gap-1"><Droplets className="w-3 h-3 text-blue-400" /> Stock actual</span>
-              <span className="font-bold text-slate-700">{stockActual.toFixed(1)} L{capacidad ? ` / ${capacidad} L` : ''}</span>
+        {/* ── ÚLTIMA CARGA (strip compacto) ── */}
+        <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
+          <span className="text-slate-400 shrink-0">Última carga</span>
+          {ultimaCarga ? (
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <span className="text-slate-500 tabular-nums">{ultimaCarga.fecha}</span>
+              <span className="font-semibold text-slate-700">{Number(ultimaCarga.litros || 0).toFixed(1)} L</span>
+              {ultimaCarga.monto != null && (
+                <span className="text-slate-400">{formatMonto(ultimaCarga.monto)}</span>
+              )}
             </div>
-            {capacidad && <StockBar pct={stockPct} />}
-            {coberturaDias != null && (
-              <p className={`text-[10px] mt-1 font-medium ${coberturaDias < 3 ? 'text-red-500' : coberturaDias < 7 ? 'text-amber-500' : 'text-emerald-600'}`}>
-                Cobertura estimada: ~{coberturaDias} días (basado en últimos 30d)
-              </p>
-            )}
+          ) : <span className="text-slate-300">Sin registros</span>}
+        </div>
+
+        {/* ── STATS 3-COL: Lectura odo | Km (mes) | Cargas (mes) ── */}
+        <div className="grid grid-cols-3 gap-1.5 text-xs">
+          <Stat label="Lectura odo.">
+            {ultimoOdometro != null ? (
+              <>
+                <p className="font-semibold text-slate-700 tabular-nums">{ultimoOdometro.toLocaleString()} km</p>
+                <p className="text-[10px] text-slate-400">{ultimoOdometroFecha}</p>
+              </>
+            ) : <p className="text-slate-300 font-medium">—</p>}
+          </Stat>
+
+          <Stat label="Km este mes">
+            {kmMes > 0 ? (
+              <p className="font-semibold text-slate-700 tabular-nums">{kmMes.toLocaleString()} km</p>
+            ) : <p className="text-slate-300 font-medium">—</p>}
+          </Stat>
+
+          <Stat label="Cargas (mes)">
+            {numCargasMes > 0 ? (
+              <>
+                <p className="font-semibold text-slate-700">
+                  <span className="text-sky-700">{numCargasMes}</span>
+                  <span className="text-slate-400 font-normal"> · </span>
+                  {litrosMes.toFixed(1)} L
+                </p>
+                {gastoMes > 0 && <p className="text-[10px] text-slate-400">{formatMonto(gastoMes)}</p>}
+              </>
+            ) : <p className="text-slate-300 font-medium">Sin cargas</p>}
+          </Stat>
+        </div>
+
+        {/* ── CONSUMO (real vs fabricante con desviación) ── */}
+        {(ultimoConsumoReal != null || consumoRef != null) && (
+          <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
+            <span className="flex items-center gap-1 text-slate-400 shrink-0">
+              <Gauge className="w-3 h-3" /> Consumo
+            </span>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              {ultimoConsumoReal != null && (
+                <span className={`font-semibold tabular-nums ${
+                  estadoConsumo === 'critico' ? 'text-red-600'
+                  : estadoConsumo === 'alerta' ? 'text-amber-600'
+                  : 'text-sky-700'
+                }`}>
+                  {ultimoConsumoReal.toFixed(2)} km/L
+                </span>
+              )}
+              {consumoRef != null && (
+                <span className="text-slate-400">fab: {consumoRef} km/L</span>
+              )}
+              {desvPct !== null && Math.abs(desvPct) >= umbralAlerta && (
+                <span className={`text-[10px] font-bold px-1 rounded ${
+                  desvPct >= umbralCritico ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {desvPct > 0 ? '↓' : '↑'}{Math.abs(desvPct).toFixed(0)}%
+                </span>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          {/* Última carga */}
-          {ultimaCompra && (
-            <div>
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">Última carga</p>
-              <p className="font-semibold text-slate-700">
-                {ultimaCompra.litros != null ? `${Number(ultimaCompra.litros).toFixed(1)} L` : ''}
-                {ultimaCompra.monto != null ? <span className="text-slate-400 ml-1 text-[10px]">{formatMonto(ultimaCompra.monto)}</span> : ''}
-              </p>
-              <p className="text-[10px] text-slate-400">{ultimaCompra.fecha}</p>
-            </div>
-          )}
-
-          {/* Litros este mes */}
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wide">Litros mes</p>
-            <p className="font-semibold text-slate-700">{litrosMes > 0 ? `${litrosMes.toFixed(1)} L` : '—'}</p>
-          </div>
-
-          {/* Odómetro */}
-          {!esTanqueConsumidor && ultimoOdometro != null && (
-            <div>
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">Odómetro</p>
-              <p className="font-semibold text-slate-700">{ultimoOdometro.toLocaleString()} km</p>
-            </div>
-          )}
-
-          {/* Días sin abastecer */}
-          {!esTanqueConsumidor && (
-            <div>
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">Último abast.</p>
-              {diasSinAbast === null
-                ? <p className="text-slate-400">Sin registros</p>
-                : <p className={`font-semibold ${colorDias}`}>{diasSinAbast}d atrás</p>
-              }
-            </div>
-          )}
-
-          {/* Consumo real */}
-          {!esTanqueConsumidor && ultimoConsumoReal != null && (
-            <div className="col-span-2">
-              <p className="text-[10px] text-slate-400 uppercase tracking-wide">Consumo real (últ. carga)</p>
-              <div className="flex items-center gap-2">
-                <p className={`font-semibold ${estadoConsumo === 'critico' ? 'text-red-600' : estadoConsumo === 'alerta' ? 'text-amber-600' : 'text-sky-700'}`}>
-                  {ultimoConsumoReal.toFixed(2)} km/L
-                </p>
-                {consumoRef && (
-                  <span className="text-[10px] text-slate-400">ref: {consumoRef.toFixed(2)} km/L</span>
-                )}
-              </div>
-            </div>
-          )}
+        {/* ── DÍAS SIN ABASTECIMIENTO (footer coloreado) ── */}
+        <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${diasStyle}`}>
+          <span className="opacity-75">Sin abastecimiento</span>
+          <span className="font-bold tabular-nums">
+            {diasSinAbast != null ? `${diasSinAbast} días` : '—'}
+          </span>
         </div>
+
       </CardContent>
     </Card>
   );
@@ -219,6 +491,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
 
 export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, movimientos }) {
   const hoy = new Date();
+  const mesActual = hoy.toISOString().slice(0, 7);
   const consumidoresActivos = consumidores.filter(c => c.activo);
 
   const grupos = tiposConsumidor
@@ -235,41 +508,113 @@ export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, mov
     grupos.push({ tipo: { id: '__none', nombre: 'Sin clasificar' }, items: sinTipo });
   }
 
+  // Todos los grupos abiertos por defecto
+  const [openGroups, setOpenGroups] = useState(() => new Set(grupos.map(g => g.tipo.id)));
+  const [tabByGroup, setTabByGroup] = useState({});
+  const toggle = (id) => setOpenGroups(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
   if (grupos.length === 0) {
     return <p className="text-sm text-slate-400">No hay consumidores activos registrados</p>;
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-2">
       {grupos.map(({ tipo, items }) => {
-        const mesActual = hoy.toISOString().slice(0, 7);
+        const isOpen = openGroups.has(tipo.id);
+
         const comprasMes = movimientos.filter(m =>
           m.tipo === 'COMPRA' && m.fecha?.startsWith(mesActual) &&
           items.some(c => c.id === m.consumidor_id)
         );
-        const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
-        const gastoMes = comprasMes.reduce((s, m) => s + (m.monto || 0), 0);
+        const despachosMesRecibidos = movimientos.filter(m =>
+          m.tipo === 'DESPACHO' && m.fecha?.startsWith(mesActual) &&
+          items.some(c => c.id === m.consumidor_id)
+        );
+        const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0)
+                        + despachosMesRecibidos.reduce((s, m) => s + (m.litros || 0), 0);
+        const gastoMes  = comprasMes.reduce((s, m) => s + (m.monto  || 0), 0);
+        const kmMes     = comprasMes.reduce((s, m) => s + (m.km_recorridos || 0), 0);
+
+        // Litros por combustible este mes (para el header colapsado)
+        const litrosPorCombustible = {};
+        [...comprasMes, ...despachosMesRecibidos].forEach(m => {
+          const nombre = m.combustible_nombre;
+          if (nombre) litrosPorCombustible[nombre] = (litrosPorCombustible[nombre] || 0) + (m.litros || 0);
+        });
+
+        // Tipos de combustible únicos en este grupo (para tabs)
+        const combustiblesGrupo = [...new Set(items.map(c => c.combustible_nombre).filter(Boolean))].sort();
+        const tabActual = tabByGroup[tipo.id] ?? 'all';
+        const itemsFiltrados = tabActual === 'all' ? items : items.filter(c => c.combustible_nombre === tabActual);
 
         return (
-          <div key={tipo.id}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">{getIconForTipo(tipo.nombre)}</span>
-                <span className="text-sm font-semibold text-slate-600 uppercase tracking-wide">{tipo.nombre}</span>
-                <Badge variant="outline" className="text-[10px] py-0 px-1.5">{items.length}</Badge>
+          <div key={tipo.id} className="glass rounded-xl overflow-hidden">
+            {/* ── Cabecera del grupo (clickable) ── */}
+            <button
+              onClick={() => toggle(tipo.id)}
+              className="w-full flex items-center gap-3 px-4 py-3 glass-subtle hover:bg-white/50 dark:hover:bg-slate-800/50 transition-colors text-left"
+            >
+              <span className="text-sm">{getIconForTipo(tipo.nombre)}</span>
+              <span className="text-sm font-semibold text-slate-700 uppercase tracking-wide flex-1 min-w-0 truncate">
+                {tipo.nombre}
+              </span>
+              <Badge variant="outline" className="text-[10px] py-0 px-1.5 shrink-0">{items.length}</Badge>
+              {/* Mini-stats siempre visibles */}
+              <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 shrink-0 flex-wrap">
+                {Object.entries(litrosPorCombustible).map(([nombre, litros], i) => (
+                  <span key={nombre} className="flex items-center gap-1">
+                    {i > 0 && <span className="text-slate-300">·</span>}
+                    <b className={fuelColor(nombre)}>{litros.toFixed(1)} L</b>
+                    <span className="text-[10px]">{abbrFuel(nombre)}</span>
+                  </span>
+                ))}
+                {Object.keys(litrosPorCombustible).length === 0 && litrosMes > 0 && (
+                  <span><b className="text-slate-600">{litrosMes.toFixed(1)} L</b> mes</span>
+                )}
+                {gastoMes > 0 && <span className="text-slate-300 ml-1">·</span>}
+                {gastoMes > 0 && <span><b className="text-slate-600">{formatMonto(gastoMes)}</b></span>}
+                {kmMes    > 0 && <span className="text-slate-300">·</span>}
+                {kmMes    > 0 && <span><b className="text-slate-600">{kmMes.toLocaleString()} km</b></span>}
               </div>
-              {litrosMes > 0 && (
-                <div className="ml-auto flex items-center gap-3 text-xs text-slate-400">
-                  <span><b className="text-slate-600">{litrosMes.toFixed(1)} L</b> este mes</span>
-                  {gastoMes > 0 && <span><b className="text-slate-600">{formatMonto(gastoMes)}</b></span>}
+              <ChevronDown
+                className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {/* ── Cards del grupo (colapsable) ── */}
+            {isOpen && (
+              <div className="bg-white/30 dark:bg-slate-900/20">
+                {combustiblesGrupo.length > 1 && (
+                  <div className="flex gap-0.5 flex-wrap border-b border-slate-200/70 dark:border-slate-700/50 px-3">
+                    {[
+                      { value: 'all', label: `Todos (${items.length})` },
+                      ...combustiblesGrupo.map(n => ({ value: n, label: `${n} (${items.filter(c => c.combustible_nombre === n).length})` })),
+                    ].map(({ value, label }) => (
+                      <button
+                        key={value}
+                        onClick={() => setTabByGroup(prev => ({ ...prev, [tipo.id]: value }))}
+                        className={`px-2.5 py-2 text-[11px] font-medium border-b-2 -mb-px transition-colors ${
+                          tabActual === value
+                            ? 'border-sky-500 text-sky-700 dark:text-sky-400'
+                            : 'border-transparent text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {itemsFiltrados.map(c => (
+                    <ConsumidorCard key={c.id} consumidor={c} movimientos={movimientos} hoy={hoy} />
+                  ))}
                 </div>
-              )}
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {items.map(c => (
-                <ConsumidorCard key={c.id} consumidor={c} movimientos={movimientos} hoy={hoy} />
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         );
       })}
