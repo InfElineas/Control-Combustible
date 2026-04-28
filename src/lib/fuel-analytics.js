@@ -50,8 +50,9 @@ export function computeVehiculoMonthlyStats(vehiculo, movimientos = [], month = 
 
   const movsMes = filterMovimientosByMonth(movsVeh, month);
   const comprasMes = movsMes.filter((m) => m.tipo === 'COMPRA');
+  const abastecimientosMes = movsMes.filter((m) => m.tipo === 'COMPRA' || m.tipo === 'DESPACHO');
 
-  const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
+  const litrosMes = abastecimientosMes.reduce((s, m) => s + (m.litros || 0), 0);
   const consumoMovs = comprasMes.filter((m) => m.consumo_real != null && m.consumo_real > 0);
   const consumoMes = consumoMovs.length > 0
     ? consumoMovs.reduce((s, m) => s + (m.consumo_real || 0), 0) / consumoMovs.length
@@ -60,7 +61,7 @@ export function computeVehiculoMonthlyStats(vehiculo, movimientos = [], month = 
   const odometrosMes = comprasMes.filter((m) => m.odometro != null).map((m) => Number(m.odometro));
   const odometroInicio = odometrosMes.length > 0 ? Math.min(...odometrosMes) : null;
 
-  const ultimaCarga = [...movsVeh].reverse().find((m) => m.tipo === 'COMPRA');
+  const ultimaCarga = [...movsVeh].reverse().find((m) => m.tipo === 'COMPRA' || m.tipo === 'DESPACHO');
   const fechaUltimoAbastecimiento = ultimaCarga?.fecha || null;
 
   let diasDesdeUltimoAbast = null;

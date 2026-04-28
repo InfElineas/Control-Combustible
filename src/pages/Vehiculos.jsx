@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import CombustibleBadge from '@/components/ui-helpers/CombustibleBadge';
 import { toast } from "sonner";
-import { Plus, Pencil, Power, Trash2, Truck, TrendingUp, AlertTriangle, Clock } from 'lucide-react';
+import { Plus, Pencil, Power, Trash2, TrendingUp, AlertTriangle, Clock } from 'lucide-react';
 import StatusBadge from '@/components/ui-helpers/StatusBadge';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
 import { computeVehiculoMonthlyStats, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
@@ -27,7 +28,7 @@ const emptyForm = {
 export default function Vehiculos() {
   const queryClient = useQueryClient();
   const { data: vehiculos = [] } = useQuery({ queryKey: ['vehiculos'], queryFn: () => base44.entities.Vehiculo.list() });
-  const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-created_date', 500) });
+  const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-fecha', 500) });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mesFiltro, setMesFiltro] = useState('ALL');
@@ -242,7 +243,7 @@ export default function Vehiculos() {
                             </td>
                             <td className="px-4 py-2.5 hidden sm:table-cell">
                               {v.combustible_nombre
-                                ? <Badge variant="outline" className="text-[10px] border-orange-200 text-orange-700">{v.combustible_nombre}</Badge>
+                                ? <CombustibleBadge nombre={v.combustible_nombre} />
                                 : <span className="text-slate-300">—</span>}
                             </td>
                             <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
@@ -309,53 +310,90 @@ export default function Vehiculos() {
         </div>
       )}
 
-      <div className="grid gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {vehiculos.map(v => {
           const stats = computeVehiculoMonthlyStats(v, movimientos, mesFiltro);
-          const estadoColor = {
-            'Operativo': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-            'En mantenimiento': 'bg-amber-50 text-amber-700 border-amber-200',
-            'Fuera de servicio': 'bg-red-50 text-red-700 border-red-200',
-            'Baja': 'bg-slate-100 text-slate-500 border-slate-200',
-          }[v.estado_vehiculo] || 'bg-slate-100 text-slate-500 border-slate-200';
+          const consumoEsperado = Number(v.indice_consumo_real) || Number(v.indice_consumo_fabricante) || 0;
+          const consumoAlerta = consumoEsperado > 0 && stats.consumoMes > 0
+            && ((consumoEsperado - stats.consumoMes) / consumoEsperado) * 100 >= 20;
+          const dias = stats.diasDesdeUltimoAbast;
+          const diasStyle = dias == null ? 'bg-slate-50 text-slate-400'
+            : dias > 30 ? 'bg-red-50 text-red-700'
+            : dias > 14 ? 'bg-amber-50 text-amber-700'
+            : 'bg-emerald-50 text-emerald-700';
+          const estadoBorderColor = {
+            'Operativo': 'border-emerald-200 text-emerald-700',
+            'En mantenimiento': 'border-amber-200 text-amber-700',
+            'Fuera de servicio': 'border-red-200 text-red-700',
+            'Baja': 'border-slate-200 text-slate-500',
+          }[v.estado_vehiculo] || 'border-slate-200 text-slate-500';
           return (
-            <Card key={v.id} className={`border-0 shadow-sm ${!v.activa ? 'opacity-60' : ''}`}>
-              <CardContent className="p-4 flex items-start gap-4">
-                <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center shrink-0 mt-0.5">
-                  <Truck className="w-5 h-5 text-violet-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold text-slate-800">{v.chapa}</span>
-                    {v.alias && <span className="text-sm text-slate-500">{v.alias}</span>}
-                    <StatusBadge active={v.activa} />
+            <Card key={v.id} className={`border border-slate-200 shadow-sm ${!v.activa ? 'opacity-60' : ''}`}>
+              <CardContent className="p-3 space-y-2">
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-sm font-bold text-slate-800">{v.alias || v.chapa}</h3>
+                      {consumoAlerta && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {v.alias ? v.chapa : [v.marca, v.modelo, v.anio].filter(Boolean).join(' ')}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap justify-end items-center gap-1 shrink-0">
+                    {v.combustible_nombre && (
+                      <CombustibleBadge nombre={v.combustible_nombre} />
+                    )}
                     {v.estado_vehiculo && (
-                      <Badge variant="outline" className={`text-[10px] ${estadoColor}`}>{v.estado_vehiculo}</Badge>
+                      <Badge variant="outline" className={`text-[10px] ${estadoBorderColor}`}>{v.estado_vehiculo}</Badge>
                     )}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-400">
-                    {(v.marca || v.modelo) && <span>{[v.marca, v.modelo, v.anio].filter(Boolean).join(' ')}</span>}
-                    {v.tipo_vehiculo && <span>{v.tipo_vehiculo}</span>}
-                    {v.combustible_nombre && <span>⛽ {v.combustible_nombre}</span>}
-                    {v.capacidad_tanque && <span>🛢 {v.capacidad_tanque} L</span>}
-                    {v.indice_consumo_real && <span>📊 {v.indice_consumo_real} km/L (real)</span>}
-                    {v.conductor && <span>👤 {v.conductor}</span>}
-                    {v.responsable && <span>🏷 {v.responsable}</span>}
-                    {v.funcion && <span className="truncate max-w-xs">{v.funcion}</span>}
+                </div>
+
+                {/* Data grid 2×2 */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-slate-400">Última carga</p>
+                    {stats.ultimaCarga ? (
+                      <>
+                        <p className="font-semibold">{Number(stats.ultimaCarga.litros || 0).toFixed(1)} L{stats.ultimaCarga.precio ? ` · $${Number(stats.ultimaCarga.precio).toFixed(2)}` : ''}</p>
+                        <p className="text-slate-500">{stats.ultimaCarga.fecha}</p>
+                      </>
+                    ) : <p className="text-slate-300 font-medium">Sin datos</p>}
                   </div>
-                  <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-[11px] text-slate-600">
-                    <span><b>Litros del mes:</b> {stats.litrosMes ? `${stats.litrosMes.toFixed(1)} L` : 'Sin datos'}</span>
-                    <span><b>Consumo prom.:</b> {stats.consumoMes ? `${stats.consumoMes.toFixed(2)} km/L` : 'No disponible'}</span>
-                    <span><b>Odómetro inicio:</b> {stats.odometroInicio != null ? `${stats.odometroInicio.toLocaleString()} km` : 'No disponible'}</span>
-                    <span><b>Última carga:</b> {stats.ultimaCarga?.fecha || 'Sin datos'}</span>
-                    <span><b>Fecha último abast.:</b> {stats.fechaUltimoAbastecimiento || 'Sin datos'}</span>
-                    <span><b>Días desde abast.:</b> {stats.diasDesdeUltimoAbast != null ? `${stats.diasDesdeUltimoAbast} días` : 'Sin datos'}</span>
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-slate-400">Litros (período)</p>
+                    <p className="font-semibold">{stats.litrosMes > 0 ? `${stats.litrosMes.toFixed(1)} L` : '—'}</p>
+                    {stats.odometroInicio != null && (
+                      <p className="text-slate-500">{stats.odometroInicio.toLocaleString()} km</p>
+                    )}
+                  </div>
+                  <div className="rounded-md bg-slate-50 p-2">
+                    <p className="text-slate-400">Consumo real (últ.)</p>
+                    {stats.consumoMes > 0
+                      ? <p className={`font-semibold ${consumoAlerta ? 'text-amber-600' : 'text-slate-700'}`}>{stats.consumoMes.toFixed(2)} km/L</p>
+                      : <p className="text-slate-300 font-medium">Sin datos</p>
+                    }
+                    {consumoEsperado > 0 && <p className="text-slate-400">ref: {consumoEsperado} km/L</p>}
+                  </div>
+                  <div className={`rounded-md p-2 ${diasStyle}`}>
+                    <p className="opacity-70 text-[11px]">Días sin abast.</p>
+                    <p className="font-bold text-sm">{dias != null ? `${dias}d atrás` : '—'}</p>
+                    {v.capacidad_tanque && <p className="opacity-60 text-[11px]">🛢 {v.capacidad_tanque} L</p>}
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(v)}><Pencil className="w-3.5 h-3.5" /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(v)}><Power className={`w-3.5 h-3.5 ${v.activa ? 'text-emerald-500' : 'text-slate-300'}`} /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => handleDelete(v)}><Trash2 className="w-3.5 h-3.5" /></Button>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {v.conductor ? `👤 ${v.conductor}` : v.responsable ? `🏷 ${v.responsable}` : v.area_centro || ''}
+                  </p>
+                  <div className="flex gap-0.5 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(v)}><Pencil className="w-3 h-3" /></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleActive(v)}><Power className={`w-3 h-3 ${v.activa ? 'text-emerald-500' : 'text-slate-300'}`} /></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-300 hover:text-red-500" onClick={() => handleDelete(v)}><Trash2 className="w-3 h-3" /></Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

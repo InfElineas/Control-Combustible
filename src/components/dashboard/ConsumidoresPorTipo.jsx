@@ -70,9 +70,15 @@ function Stat({ label, children, className = '' }) {
   );
 }
 
+function esEquipo(consumidor) {
+  const n = (consumidor.tipo_consumidor_nombre || '').toLowerCase();
+  return n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
+}
+
 function ConsumidorCard({ consumidor, movimientos, hoy }) {
   const mesActual = hoy.toISOString().slice(0, 7);
   const esTanqueConsumidor = esTanque(consumidor);
+  const esEquipoConsumidor = esEquipo(consumidor);
   const [detallesOpen, setDetallesOpen] = useState(false);
 
   // ── Compras ordenadas por fecha desc ──────────────────────────────────────
@@ -89,20 +95,44 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
       .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')),
   [movimientos, consumidor.id]);
 
-  const ultimaCarga = compras[0] ?? null;
+  const ultimaCarga = React.useMemo(() => {
+    const c = compras[0] ?? null;
+    const d = despachosRecibidos[0] ?? null;
+    if (!c && !d) return null;
+    if (!c) return d;
+    if (!d) return c;
+    return c.fecha >= d.fecha ? c : d;
+  }, [compras, despachosRecibidos]);
   const diasSinAbast = ultimaCarga
     ? Math.floor((hoy - new Date(ultimaCarga.fecha + 'T00:00:00')) / 864e5)
     : null;
 
-  // ── Mes actual ────────────────────────────────────────────────────────────
-  const comprasMes = React.useMemo(() =>
-    compras.filter(m => m.fecha?.startsWith(mesActual)),
-  [compras, mesActual]);
+  // ── Mes de referencia: actual si tiene actividad, sino el último con actividad
+  const mesReferencia = React.useMemo(() => {
+    const hayEsteMes = [...compras, ...despachosRecibidos]
+      .some(m => m.fecha?.startsWith(mesActual));
+    if (hayEsteMes) return mesActual;
+    const masReciente = [...compras, ...despachosRecibidos]
+      .filter(m => m.fecha)
+      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))[0];
+    return masReciente?.fecha?.slice(0, 7) ?? mesActual;
+  }, [compras, despachosRecibidos, mesActual]);
 
-  const litrosMes    = comprasMes.reduce((s, m) => s + (m.litros || 0), 0);
+  const esMesActual = mesReferencia === mesActual;
+
+  // ── Cargas del mes de referencia ─────────────────────────────────────────
+  const comprasMes = React.useMemo(() =>
+    compras.filter(m => m.fecha?.startsWith(mesReferencia)),
+  [compras, mesReferencia]);
+
+  const despachosRecibidosMes = React.useMemo(() =>
+    despachosRecibidos.filter(m => m.fecha?.startsWith(mesReferencia)),
+  [despachosRecibidos, mesReferencia]);
+
+  const litrosMes    = comprasMes.reduce((s, m) => s + (m.litros || 0), 0)
+                     + despachosRecibidosMes.reduce((s, m) => s + (m.litros || 0), 0);
   const gastoMes     = comprasMes.reduce((s, m) => s + (m.monto  || 0), 0);
-  const numCargasMes = comprasMes.length;
-  const kmMes        = comprasMes.reduce((s, m) => s + (m.km_recorridos || 0), 0);
+  const numCargasMes = comprasMes.length + despachosRecibidosMes.length;
 
   // ── Odómetro: lectura más alta (= más reciente) ───────────────────────────
   const comprasConOdo = React.useMemo(() =>
@@ -110,9 +140,97 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
       .sort((a, b) => (b.odometro || 0) - (a.odometro || 0)),
   [compras]);
 
-  const ultimoOdometro      = comprasConOdo[0]?.odometro   ?? null;
-  const ultimoOdometroFecha = comprasConOdo[0]?.fecha       ?? null;
-  const ultimoConsumoReal   = comprasConOdo[0]?.consumo_real ?? null;
+  const ultimoOdometro    = comprasConOdo[0]?.odometro    ?? null;
+  const ultimoConsumoReal = comprasConOdo[0]?.consumo_real ?? null;
+
+  // ── Odómetro: últimas dos lecturas registradas (sin filtro de mes) ─────────
+  // comprasConOdo está ordenado por odómetro DESC → [0] = última, [1] = anterior
+  const odoFin      = comprasConOdo[0]?.odometro ?? null;
+  const odoFinFecha = comprasConOdo[0]?.fecha    ?? null;
+  const odoInicio   = comprasConOdo[1]?.odometro ?? null;
+
+  const kmEntreOdo = odoFin != null && odoInicio != null && odoFin > odoInicio
+    ? odoFin - odoInicio
+    : null;
+
+  // Índice de consumo: km entre las dos últimas lecturas / litros del mes
+  const indiceConsumoRealMes = kmEntreOdo != null && litrosMes > 0
+    ? kmEntreOdo / litrosMes
+    : null;
+
+  // ── Consumo verificado por nivel de tanque ────────────────────────────────
+  // Requiere dos cargas consecutivas con nivel_tanque registrado
+  const fillsConNivel = React.useMemo(() => {
+    if (esEquipoConsumidor) return [];
+    return [...compras, ...despachosRecibidos]
+      .filter(m => m.nivel_tanque != null && m.nivel_tanque >= 0)
+      .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+  }, [esEquipoConsumidor, compras, despachosRecibidos]);
+
+  const nivelData = React.useMemo(() => {
+    if (fillsConNivel.length < 2) return null;
+    const actual   = fillsConNivel[0]; // carga más reciente con nivel
+    const anterior = fillsConNivel[1]; // carga anterior con nivel
+
+    // Litros en tanque tras la carga anterior
+    const nivelPostAnterior = (anterior.nivel_tanque || 0) + (anterior.litros || 0);
+    // Litros en tanque antes de la carga actual (lo que quedaba)
+    const nivelPreActual = actual.nivel_tanque || 0;
+    // Combustible realmente consumido entre ambas cargas
+    const litrosConsumidos = nivelPostAnterior - nivelPreActual;
+    if (litrosConsumidos <= 0) return null; // dato inconsistente
+
+    // Km del intervalo: usar km_recorridos del movimiento o diferencia de odómetros
+    const kmIntervalo =
+      (actual.km_recorridos && actual.km_recorridos > 0 ? actual.km_recorridos : null) ??
+      (actual.odometro != null && anterior.odometro != null
+        ? actual.odometro - anterior.odometro
+        : null);
+
+    const indice = kmIntervalo != null && kmIntervalo > 0
+      ? kmIntervalo / litrosConsumidos
+      : null;
+
+    // Discrepancia entre litros cargados y litros realmente consumidos
+    const litrosCargados    = actual.litros || 0;
+    const discrepanciaL     = litrosConsumidos - litrosCargados;
+    // Positivo = consumió más de lo que cargó (déficit)
+    // Negativo = consumió menos de lo que cargó (sobra en tanque, normal si no lo llenó completo)
+    const discrepanciaPct   = litrosCargados > 0
+      ? (Math.abs(discrepanciaL) / litrosCargados) * 100
+      : null;
+
+    return {
+      litrosConsumidos,
+      litrosCargados,
+      nivelPostAnterior,
+      nivelPreActual,
+      indice,
+      kmIntervalo,
+      discrepanciaL,
+      discrepanciaPct,
+      fechaActual:   actual.fecha,
+      fechaAnterior: anterior.fecha,
+    };
+  }, [fillsConNivel]);
+
+  // ── Horas de uso (equipos/generadores) ───────────────────────────────────
+  const movsConHoras = React.useMemo(() => {
+    if (!esEquipoConsumidor) return [];
+    const todos = [...compras, ...despachosRecibidos].filter(m => m.horas_uso != null);
+    return todos.sort((a, b) => (b.horas_uso || 0) - (a.horas_uso || 0));
+  }, [esEquipoConsumidor, compras, despachosRecibidos]);
+
+  const ultimasHoras      = movsConHoras[0]?.horas_uso ?? null;
+  const ultimasHorasFecha = movsConHoras[0]?.fecha     ?? null;
+  const horasMes = React.useMemo(() => {
+    if (!esEquipoConsumidor) return 0;
+    const lecturaMes   = movsConHoras.find(m => m.fecha?.startsWith(mesActual))?.horas_uso ?? null;
+    const lecturaAntes = movsConHoras.find(m => !m.fecha?.startsWith(mesActual) && (m.fecha || '') < mesActual)?.horas_uso ?? null;
+    if (lecturaMes == null) return 0;
+    if (lecturaAntes == null) return 0;
+    return Math.max(0, lecturaMes - lecturaAntes);
+  }, [esEquipoConsumidor, movsConHoras, mesActual]);
 
   // ── Referencias de consumo ────────────────────────────────────────────────
   const consumoRealRef    = consumidor.datos_vehiculo?.indice_consumo_real      ?? null;
@@ -121,10 +239,12 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   const umbralCritico     = consumidor.datos_vehiculo?.umbral_critico_pct ?? 30;
   const umbralAlerta      = consumidor.datos_vehiculo?.umbral_alerta_pct  ?? 15;
 
+  // Prioridad para alertas: nivel_tanque > índice_mes_odo > última_carga
+  const consumoParaAlerta = nivelData?.indice ?? indiceConsumoRealMes ?? ultimoConsumoReal;
   let estadoConsumo = null;
   let desvPct       = null;
-  if (consumoRef && ultimoConsumoReal != null) {
-    desvPct = ((consumoRef - ultimoConsumoReal) / consumoRef) * 100;
+  if (consumoRef && consumoParaAlerta != null) {
+    desvPct = ((consumoRef - consumoParaAlerta) / consumoRef) * 100;
     if (desvPct >= umbralCritico) estadoConsumo = 'critico';
     else if (desvPct >= umbralAlerta) estadoConsumo = 'alerta';
   }
@@ -401,82 +521,149 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
           </div>
         </div>
 
-        {/* ── ÚLTIMA CARGA (strip compacto) ── */}
+        {/* ── EQUIPO: horas ── */}
+        {esEquipoConsumidor && (
+          <div className="grid grid-cols-3 gap-1.5 text-xs">
+            <Stat label="Horas usadas">
+              {ultimasHoras != null ? (
+                <>
+                  <p className="font-semibold text-slate-700 tabular-nums">{ultimasHoras.toLocaleString()} h</p>
+                  <p className="text-[10px] text-slate-400">{ultimasHorasFecha}</p>
+                </>
+              ) : <p className="text-slate-300 font-medium">—</p>}
+            </Stat>
+            <Stat label="Horas este mes">
+              {horasMes > 0
+                ? <p className="font-semibold text-slate-700 tabular-nums">{horasMes.toFixed(1)} h</p>
+                : <p className="text-slate-300 font-medium">—</p>}
+            </Stat>
+            <Stat label="Cargas (mes)">
+              {numCargasMes > 0
+                ? <p className="font-semibold text-slate-700"><span className="text-sky-700">{numCargasMes}</span> · {litrosMes.toFixed(1)} L</p>
+                : <p className="text-slate-300 font-medium">Sin cargas</p>}
+            </Stat>
+          </div>
+        )}
+        {esEquipoConsumidor && consumidor.datos_equipo?.indice_consumo_referencia && (
+          <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
+            <span className="flex items-center gap-1 text-slate-400 shrink-0">
+              <Gauge className="w-3 h-3" /> Consumo ref.
+            </span>
+            <span className="font-semibold text-slate-700">
+              {consumidor.datos_equipo.indice_consumo_referencia} {consumidor.datos_equipo.unidad_medida_consumo || 'L/h'}
+            </span>
+          </div>
+        )}
+
+        {/* ── VEHÍCULO: resumen mensual ── */}
+        {!esEquipoConsumidor && (
+          <div className="rounded-lg border border-slate-100 bg-slate-50/60 text-xs overflow-hidden">
+            <p className="text-[9px] uppercase tracking-widest px-2.5 pt-2 pb-1 flex items-center gap-1.5">
+              <span className={esMesActual ? 'text-slate-400' : 'text-amber-500'}>
+                {esMesActual
+                  ? 'Resumen del mes'
+                  : `Último activo · ${new Date(mesReferencia + '-02').toLocaleDateString('es', { month: 'long', year: 'numeric' })}`}
+              </span>
+            </p>
+
+            {/* Fila odómetro */}
+            <div className="grid grid-cols-3 gap-0 border-b border-slate-100">
+              {[
+                { label: 'Odo. inicio', value: odoInicio != null ? `${odoInicio.toLocaleString()} km` : null },
+                { label: 'Odo. final',  value: odoFin    != null ? `${odoFin.toLocaleString()} km`    : null, sub: odoFinFecha },
+                { label: 'Km recorridos', value: kmEntreOdo != null ? `${kmEntreOdo.toLocaleString()} km` : null, highlight: true },
+              ].map(({ label, value, highlight, sub }) => (
+                <div key={label} className="px-2.5 py-1.5 border-r border-slate-100 last:border-r-0">
+                  <p className="text-[9px] text-slate-400 leading-none mb-0.5">{label}</p>
+                  <p className={`font-semibold tabular-nums ${highlight ? 'text-sky-700' : 'text-slate-700'}`}>
+                    {value ?? <span className="text-slate-300 font-normal">—</span>}
+                  </p>
+                  {sub && <p className="text-[9px] text-slate-400 leading-none mt-0.5">{sub}</p>}
+                </div>
+              ))}
+            </div>
+
+            {/* Fila litros / consumo */}
+            <div className="grid grid-cols-3 gap-0">
+              <div className="px-2.5 py-1.5 border-r border-slate-100">
+                <p className="text-[9px] text-slate-400 leading-none mb-0.5">Litros del mes</p>
+                <p className="font-semibold text-slate-700">{litrosMes > 0 ? `${litrosMes.toFixed(1)} L` : <span className="text-slate-300 font-normal">—</span>}</p>
+                {gastoMes > 0 && <p className="text-[9px] text-slate-400">{formatMonto(gastoMes)}</p>}
+                {numCargasMes > 0 && <p className="text-[9px] text-slate-400">{numCargasMes} carga{numCargasMes !== 1 ? 's' : ''}</p>}
+              </div>
+              <div className="px-2.5 py-1.5 border-r border-slate-100">
+                {/* Prioridad: nivel_tanque > odo_mes > última_carga */}
+                {nivelData?.indice != null ? (
+                  <>
+                    <p className="text-[9px] text-slate-400 leading-none mb-0.5 flex items-center gap-1">
+                      Consumo real
+                      <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 rounded font-semibold">nivel ✓</span>
+                    </p>
+                    <p className={`font-semibold tabular-nums ${estadoConsumo === 'critico' ? 'text-red-600' : estadoConsumo === 'alerta' ? 'text-amber-600' : 'text-emerald-700'}`}>
+                      {nivelData.indice.toFixed(2)} km/L
+                    </p>
+                    <p className="text-[9px] text-slate-400">{nivelData.litrosConsumidos.toFixed(1)} L cons.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[9px] text-slate-400 leading-none mb-0.5">Consumo real</p>
+                    {(() => {
+                      const val = indiceConsumoRealMes ?? ultimoConsumoReal;
+                      if (val == null) return <p className="text-slate-300 font-normal">—</p>;
+                      const colorClass = estadoConsumo === 'critico' ? 'text-red-600' : estadoConsumo === 'alerta' ? 'text-amber-600' : 'text-emerald-700';
+                      return (
+                        <>
+                          <p className={`font-semibold tabular-nums ${colorClass}`}>{val.toFixed(2)} km/L</p>
+                          {indiceConsumoRealMes == null && <p className="text-[9px] text-slate-400">última carga</p>}
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+              </div>
+              <div className="px-2.5 py-1.5">
+                <p className="text-[9px] text-slate-400 leading-none mb-0.5">Consumo fab.</p>
+                <p className="font-medium text-slate-500">{consumoRef != null ? `${consumoRef} km/L` : <span className="text-slate-300 font-normal">—</span>}</p>
+                {desvPct !== null && Math.abs(desvPct) >= umbralAlerta && (
+                  <span className={`text-[9px] font-bold px-1 rounded ${desvPct >= umbralCritico ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {desvPct > 0 ? '↓' : '↑'}{Math.abs(desvPct).toFixed(0)}%
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Discrepancia de nivel — solo si es significativa (>15%) */}
+            {nivelData?.discrepanciaPct != null && nivelData.discrepanciaPct > 15 && (
+              <div className={`flex items-start gap-1.5 px-2.5 py-1.5 border-t text-[10px] ${
+                nivelData.discrepanciaL > 0
+                  ? 'border-orange-100 bg-orange-50/60 text-orange-700'
+                  : 'border-sky-100 bg-sky-50/40 text-sky-700'
+              }`}>
+                <span className="shrink-0 mt-0.5">{nivelData.discrepanciaL > 0 ? '⚠' : 'ℹ'}</span>
+                <span>
+                  {nivelData.discrepanciaL > 0
+                    ? <>Consumió <b>{nivelData.litrosConsumidos.toFixed(1)} L</b> pero cargó <b>{nivelData.litrosCargados.toFixed(1)} L</b> — diferencia de <b>+{nivelData.discrepanciaL.toFixed(1)} L</b> ({nivelData.discrepanciaPct.toFixed(0)}%)</>
+                    : <>Cargó <b>{nivelData.litrosCargados.toFixed(1)} L</b> pero consumió <b>{nivelData.litrosConsumidos.toFixed(1)} L</b> — tanque no se llenó completo ({Math.abs(nivelData.discrepanciaL).toFixed(1)} L de margen)</>
+                  }
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── ÚLTIMA CARGA ── */}
         <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
           <span className="text-slate-400 shrink-0">Última carga</span>
           {ultimaCarga ? (
             <div className="flex items-center gap-2 flex-wrap justify-end">
               <span className="text-slate-500 tabular-nums">{ultimaCarga.fecha}</span>
               <span className="font-semibold text-slate-700">{Number(ultimaCarga.litros || 0).toFixed(1)} L</span>
-              {ultimaCarga.monto != null && (
-                <span className="text-slate-400">{formatMonto(ultimaCarga.monto)}</span>
-              )}
+              {ultimaCarga.monto != null && <span className="text-slate-400">{formatMonto(ultimaCarga.monto)}</span>}
             </div>
           ) : <span className="text-slate-300">Sin registros</span>}
         </div>
 
-        {/* ── STATS 3-COL: Lectura odo | Km (mes) | Cargas (mes) ── */}
-        <div className="grid grid-cols-3 gap-1.5 text-xs">
-          <Stat label="Lectura odo.">
-            {ultimoOdometro != null ? (
-              <>
-                <p className="font-semibold text-slate-700 tabular-nums">{ultimoOdometro.toLocaleString()} km</p>
-                <p className="text-[10px] text-slate-400">{ultimoOdometroFecha}</p>
-              </>
-            ) : <p className="text-slate-300 font-medium">—</p>}
-          </Stat>
-
-          <Stat label="Km este mes">
-            {kmMes > 0 ? (
-              <p className="font-semibold text-slate-700 tabular-nums">{kmMes.toLocaleString()} km</p>
-            ) : <p className="text-slate-300 font-medium">—</p>}
-          </Stat>
-
-          <Stat label="Cargas (mes)">
-            {numCargasMes > 0 ? (
-              <>
-                <p className="font-semibold text-slate-700">
-                  <span className="text-sky-700">{numCargasMes}</span>
-                  <span className="text-slate-400 font-normal"> · </span>
-                  {litrosMes.toFixed(1)} L
-                </p>
-                {gastoMes > 0 && <p className="text-[10px] text-slate-400">{formatMonto(gastoMes)}</p>}
-              </>
-            ) : <p className="text-slate-300 font-medium">Sin cargas</p>}
-          </Stat>
-        </div>
-
-        {/* ── CONSUMO (real vs fabricante con desviación) ── */}
-        {(ultimoConsumoReal != null || consumoRef != null) && (
-          <div className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5 text-xs gap-2">
-            <span className="flex items-center gap-1 text-slate-400 shrink-0">
-              <Gauge className="w-3 h-3" /> Consumo
-            </span>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {ultimoConsumoReal != null && (
-                <span className={`font-semibold tabular-nums ${
-                  estadoConsumo === 'critico' ? 'text-red-600'
-                  : estadoConsumo === 'alerta' ? 'text-amber-600'
-                  : 'text-sky-700'
-                }`}>
-                  {ultimoConsumoReal.toFixed(2)} km/L
-                </span>
-              )}
-              {consumoRef != null && (
-                <span className="text-slate-400">fab: {consumoRef} km/L</span>
-              )}
-              {desvPct !== null && Math.abs(desvPct) >= umbralAlerta && (
-                <span className={`text-[10px] font-bold px-1 rounded ${
-                  desvPct >= umbralCritico ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {desvPct > 0 ? '↓' : '↑'}{Math.abs(desvPct).toFixed(0)}%
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── DÍAS SIN ABASTECIMIENTO (footer coloreado) ── */}
+        {/* ── DÍAS SIN ABASTECIMIENTO ── */}
         <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${diasStyle}`}>
           <span className="opacity-75">Sin abastecimiento</span>
           <span className="font-bold tabular-nums">

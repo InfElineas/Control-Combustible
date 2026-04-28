@@ -1,19 +1,26 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { CreditCard, Users, BarChart2 } from 'lucide-react';
 import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import CSVExport from '@/components/ui-helpers/CSVExport';
+import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 import ReporteConsumo from '@/components/reportes/ReporteConsumo';
 import ReporteVehiculos from '@/components/reportes/ReporteVehiculos';
 
 export default function Reportes() {
+  const { isOperador } = useUserRole();
+  const [tab, setTab] = useState('tarjetas');
+
+  useEffect(() => {
+    if (isOperador && tab === 'tarjetas') setTab('vehiculos');
+  }, [isOperador]);
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
   const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-created_date', 2000) });
@@ -32,7 +39,10 @@ export default function Reportes() {
   // Reporte tarjetas
   const reporteTarjetas = useMemo(() => {
     return tarjetas.map(t => {
-      const movs = movsFiltered.filter(m => m.tarjeta_id === t.id);
+      const movs = movsFiltered.filter(m =>
+        m.tarjeta_id === t.id ||
+        (!m.tarjeta_id && m.tarjeta_alias && (m.tarjeta_alias === t.alias || m.tarjeta_alias === t.id_tarjeta))
+      );
       const totalRecargado = movs.filter(m => m.tipo === 'RECARGA').reduce((s, m) => s + (m.monto || 0), 0);
       const totalComprado = movs.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.monto || 0), 0);
       const saldo = calcularSaldo(t, movimientos); // saldo total (no filtrado)
@@ -87,20 +97,28 @@ export default function Reportes() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="tarjetas">
-        <TabsList className="w-full grid grid-cols-3">
-          <TabsTrigger value="tarjetas" className="gap-1.5 text-xs">
-            <CreditCard className="w-3.5 h-3.5" /> Tarjetas
-          </TabsTrigger>
-          <TabsTrigger value="vehiculos" className="gap-1.5 text-xs">
-            <BarChart2 className="w-3.5 h-3.5" /> Consumidores
-          </TabsTrigger>
-          <TabsTrigger value="consumo" className="gap-1.5 text-xs">
-            <Users className="w-3.5 h-3.5" /> Consumo
-          </TabsTrigger>
-        </TabsList>
+      <Tabs value={tab}>
+        <div className="flex gap-0.5 flex-wrap border-b border-slate-200 dark:border-slate-700 mb-4">
+          {[
+            !isOperador && { value: 'tarjetas',  label: 'Tarjetas',      icon: <CreditCard className="w-3.5 h-3.5" /> },
+            { value: 'vehiculos', label: 'Consumidores',   icon: <BarChart2  className="w-3.5 h-3.5" /> },
+            { value: 'consumo',   label: 'Consumo',        icon: <Users      className="w-3.5 h-3.5" /> },
+          ].filter(Boolean).map(({ value: v, label, icon }) => (
+            <button
+              key={v}
+              onClick={() => setTab(v)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t border-b-2 transition-colors -mb-px ${
+                tab === v
+                  ? 'border-sky-500 text-sky-700 dark:text-sky-400'
+                  : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              {icon}{label}
+            </button>
+          ))}
+        </div>
 
-        <TabsContent value="tarjetas" className="mt-4">
+        <TabsContent value="tarjetas" className="mt-0">
           <Card className="border-0 shadow-sm">
             <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
               <CardTitle className="text-sm font-semibold text-slate-700">Reporte por Tarjeta</CardTitle>
@@ -142,10 +160,10 @@ export default function Reportes() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="vehiculos" className="mt-4">
+        <TabsContent value="vehiculos" className="mt-0">
           <ReporteVehiculos consumidores={consumidores} movimientos={movsFiltered} />
         </TabsContent>
-        <TabsContent value="consumo" className="mt-4">
+        <TabsContent value="consumo" className="mt-0">
           <ReporteConsumo consumidores={consumidores} movimientos={movsFiltered} />
         </TabsContent>
       </Tabs>

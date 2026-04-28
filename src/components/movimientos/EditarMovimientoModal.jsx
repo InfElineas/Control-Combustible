@@ -24,6 +24,8 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
     litros: movimiento?.litros ?? '',
     precio: movimiento?.precio ?? '',
     odometro: movimiento?.odometro ?? '',
+    horas_uso: movimiento?.horas_uso ?? '',
+    nivel_tanque: movimiento?.nivel_tanque ?? '',
     referencia: movimiento?.referencia || '',
     tarjeta_id: movimiento?.tarjeta_id || '',
     consumidor_id: movimiento?.consumidor_id || '',
@@ -40,6 +42,8 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
         litros: movimiento.litros ?? '',
         precio: movimiento.precio ?? '',
         odometro: movimiento.odometro ?? '',
+        horas_uso: movimiento.horas_uso ?? '',
+        nivel_tanque: movimiento.nivel_tanque ?? '',
         referencia: movimiento.referencia || '',
         tarjeta_id: movimiento.tarjeta_id || '',
         consumidor_id: movimiento.consumidor_id || '',
@@ -89,6 +93,11 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
     () => consumidores.find(c => c.id === form.consumidor_id),
     [consumidores, form.consumidor_id]
   );
+
+  const esEquipoConsumidor = useMemo(() => {
+    const n = (consumidorSeleccionado?.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
+  }, [consumidorSeleccionado]);
   const capacidadTanque = useMemo(
     () => obtenerCapacidadTanque(consumidorSeleccionado),
     [consumidorSeleccionado]
@@ -147,10 +156,38 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
       data.combustible_id = combustible.id;
       data.combustible_nombre = combustible.nombre;
     }
-    if (form.monto !== '') data.monto = parseFloat(form.monto);
-    if (form.litros !== '') data.litros = parseFloat(form.litros);
-    if (form.precio !== '') data.precio = parseFloat(form.precio);
-    if (form.odometro !== '') data.odometro = parseFloat(form.odometro);
+    if (form.monto      !== '') data.monto      = parseFloat(form.monto);
+    if (form.litros     !== '') data.litros     = parseFloat(form.litros);
+    if (form.precio     !== '') data.precio     = parseFloat(form.precio);
+    if (form.nivel_tanque !== '') data.nivel_tanque = parseFloat(form.nivel_tanque);
+
+    // Odómetro para vehículos (COMPRA o DESPACHO)
+    if (!esEquipoConsumidor && form.odometro !== '') {
+      const odoNuevo = parseFloat(form.odometro);
+      data.odometro = odoNuevo;
+      // Recalcular km_recorridos y consumo_real si hay lectura anterior
+      const prevConOdo = movimientos
+        .filter(m =>
+          m.id !== movimiento.id &&
+          (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') &&
+          m.consumidor_id === form.consumidor_id &&
+          m.odometro != null &&
+          (m.fecha || '') <= (form.fecha || '')
+        )
+        .sort((a, b) => (b.odometro || 0) - (a.odometro || 0))[0];
+      if (prevConOdo && odoNuevo > prevConOdo.odometro) {
+        const km = odoNuevo - prevConOdo.odometro;
+        data.km_recorridos = km;
+        const litros = form.litros !== '' ? parseFloat(form.litros) : null;
+        if (litros && litros > 0) data.consumo_real = km / litros;
+      }
+    }
+
+    // Horas de uso para equipos/generadores
+    if (esEquipoConsumidor && form.horas_uso !== '') {
+      data.horas_uso = parseFloat(form.horas_uso);
+    }
+
     if (movimiento?.tipo === 'COMPRA') {
       data.remanente_estimado_antes = auditoriaCompra?.remanenteAntes ?? null;
       data.combustible_estimado_post = auditoriaCompra?.combustibleEstimadoPost ?? null;
@@ -264,16 +301,41 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
           )}
 
           {tipo === 'COMPRA' && (
-            <>
+            <div>
+              <Label className="text-xs text-slate-500">Precio/L</Label>
+              <Input type="number" step="0.01" value={form.precio} onChange={e => set('precio', e.target.value)} className="mt-1" />
+            </div>
+          )}
+
+          {/* Odómetro / Horas de uso — COMPRA y DESPACHO */}
+          {(tipo === 'COMPRA' || tipo === 'DESPACHO') && (
+            esEquipoConsumidor ? (
               <div>
-                <Label className="text-xs text-slate-500">Precio/L</Label>
-                <Input type="number" step="0.01" value={form.precio} onChange={e => set('precio', e.target.value)} className="mt-1" />
+                <Label className="text-xs text-slate-500">Horas de uso (lectura acumulada)</Label>
+                <Input type="number" step="0.1" min="0" value={form.horas_uso} onChange={e => set('horas_uso', e.target.value)} className="mt-1" placeholder="ej. 1250.5" />
               </div>
+            ) : (
               <div>
-                <Label className="text-xs text-slate-500">Odómetro (km)</Label>
-                <Input type="number" step="1" value={form.odometro} onChange={e => set('odometro', e.target.value)} className="mt-1" />
+                <Label className="text-xs text-slate-500">
+                  Odómetro (km)
+                  {tipo === 'DESPACHO' && !movimiento.odometro && (
+                    <span className="ml-1.5 text-amber-600 font-normal">— sin lectura registrada</span>
+                  )}
+                </Label>
+                <Input type="number" step="1" min="0" value={form.odometro} onChange={e => set('odometro', e.target.value)} className="mt-1" placeholder="ej. 125000" />
+                {tipo === 'DESPACHO' && form.odometro !== '' && (
+                  <p className="text-[10px] text-slate-400 mt-1">Se recalcularán km recorridos y consumo real al guardar.</p>
+                )}
               </div>
-            </>
+            )
+          )}
+
+          {/* Nivel en tanque — COMPRA y DESPACHO */}
+          {(tipo === 'COMPRA' || tipo === 'DESPACHO') && !esEquipoConsumidor && (
+            <div>
+              <Label className="text-xs text-slate-500">Nivel en tanque antes de cargar (L)</Label>
+              <Input type="number" step="0.1" min="0" value={form.nivel_tanque} onChange={e => set('nivel_tanque', e.target.value)} className="mt-1" placeholder="Litros que quedaban" />
+            </div>
           )}
 
           <div>

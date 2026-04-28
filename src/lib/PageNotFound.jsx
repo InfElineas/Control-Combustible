@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 export default function PageNotFound() {
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-50 to-indigo-100 dark:from-slate-950 dark:via-sky-950/20 dark:to-indigo-950 flex items-center justify-center p-6">
       <div className="text-center">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center mx-auto mb-6 shadow-lg">
           <Fuel className="w-8 h-8 text-white" />

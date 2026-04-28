@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS movimiento (
   odometro                numeric,
   km_recorridos           numeric,
   consumo_real            numeric,
+  horas_uso               numeric,
+  nivel_tanque            numeric,
   referencia              text,
   vehiculo_chapa          text,
   vehiculo_alias          text,

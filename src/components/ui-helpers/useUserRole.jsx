@@ -88,6 +88,8 @@ export function useUserRole() {
     canManageFinanzas:   isSuperAdmin || isEconomico,
     // Movimientos: qué tipos puede registrar cada rol
     canRecargar:         isSuperAdmin || isEconomico,
+    canComprar:          isSuperAdmin || isOperador,
+    canDespachar:        isSuperAdmin || isOperador,
     canComprarDespachar: isSuperAdmin || isOperador,
   };
 }

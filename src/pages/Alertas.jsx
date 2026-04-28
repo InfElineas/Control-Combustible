@@ -296,29 +296,31 @@ export default function Alertas() {
       </div>
 
       {/* Resumen */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Card className={`border-0 shadow-sm ${criticos.length > 0 ? 'ring-1 ring-red-200 bg-red-50/20' : ''}`}>
           <CardContent className="p-4">
             <p className="text-[11px] text-slate-400 uppercase tracking-wide">Críticos</p>
             <p className={`text-2xl font-bold mt-1 ${criticos.length > 0 ? 'text-red-500' : 'text-slate-300'}`}>{criticos.length}</p>
           </CardContent>
         </Card>
-        <Card className={`border-0 shadow-sm ${enAlerta.length > 0 ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''}`}>
-          <CardContent className="p-4">
-            <p className="text-[11px] text-slate-400 uppercase tracking-wide">En alerta</p>
-            <p className={`text-2xl font-bold mt-1 ${enAlerta.length > 0 ? 'text-amber-500' : 'text-slate-300'}`}>{enAlerta.length}</p>
-          </CardContent>
-        </Card>
+        {(() => {
+          const conAlertas = criticos.length + enAlerta.length + sinDatos.length;
+          return (
+            <Card className={`border-0 shadow-sm ${conAlertas > 0 ? 'ring-1 ring-amber-200 bg-amber-50/20' : ''}`}>
+              <CardContent className="p-4">
+                <p className="text-[11px] text-slate-400 uppercase tracking-wide">Con alertas</p>
+                <p className={`text-2xl font-bold mt-1 ${conAlertas > 0 ? 'text-amber-500' : 'text-slate-300'}`}>{conAlertas}</p>
+                {sinDatos.length > 0 && (
+                  <p className="text-[10px] text-slate-400 mt-0.5">{sinDatos.length} sin datos</p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })()}
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
             <p className="text-[11px] text-slate-400 uppercase tracking-wide">Normales</p>
             <p className="text-2xl font-bold mt-1 text-emerald-500">{normales.length}</p>
-          </CardContent>
-        </Card>
-        <Card className={`border-0 shadow-sm ${sinDatos.length > 0 ? 'ring-1 ring-slate-200' : ''}`}>
-          <CardContent className="p-4">
-            <p className="text-[11px] text-slate-400 uppercase tracking-wide">Sin datos</p>
-            <p className={`text-2xl font-bold mt-1 ${sinDatos.length > 0 ? 'text-slate-500' : 'text-slate-300'}`}>{sinDatos.length}</p>
           </CardContent>
         </Card>
       </div>

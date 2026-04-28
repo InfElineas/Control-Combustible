@@ -195,7 +195,10 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
           <div className="divide-y divide-slate-100">
             {tarjetasConSaldo.map(t => {
               const isExpanded = expandedId === t.id;
-              const movsTarjeta = movimientos.filter(m => m.tarjeta_id === t.id).slice(0, 5);
+              const movsTarjeta = movimientos
+                .filter(m => m.tarjeta_id === t.id || (!m.tarjeta_id && m.tarjeta_alias && (m.tarjeta_alias === t.alias || m.tarjeta_alias === t.id_tarjeta)))
+                .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+                .slice(0, 5);
               return (
                 <div key={t.id}>
                   <div className="flex items-center gap-3 px-4 py-3">
@@ -254,14 +257,18 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
                       ) : (
                         <div className="space-y-1.5">
                           {movsTarjeta.map(m => (
-                            <div key={m.id} className="flex items-center gap-3 text-xs">
+                            <div key={m.id} className="flex items-center gap-2 text-xs">
                               <span className="text-slate-400 tabular-nums w-20 shrink-0">{m.fecha}</span>
                               <Badge variant="outline" className={`text-[10px] py-0 px-1.5 shrink-0 ${
                                 m.tipo === 'RECARGA' ? 'border-emerald-200 text-emerald-700' :
                                 m.tipo === 'COMPRA'  ? 'border-orange-200 text-orange-700' :
                                 'border-purple-200 text-purple-700'
                               }`}>{m.tipo}</Badge>
-                              <span className={`font-medium ml-auto tabular-nums ${m.tipo === 'RECARGA' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                              <span className="text-slate-600 truncate flex-1 min-w-0">
+                                {m.consumidor_nombre || m.referencia || '—'}
+                                {m.litros ? <span className="text-slate-400 ml-1">{m.litros}L</span> : null}
+                              </span>
+                              <span className={`font-medium tabular-nums shrink-0 ${m.tipo === 'RECARGA' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                 {m.tipo === 'RECARGA' ? '+' : '-'}{formatMonto(m.monto)}
                               </span>
                             </div>

@@ -1,6 +1,11 @@
+function movPerteneceATarjeta(m, tarjeta) {
+  if (m.tarjeta_id) return m.tarjeta_id === tarjeta.id;
+  return m.tarjeta_alias === tarjeta.alias || m.tarjeta_alias === tarjeta.id_tarjeta;
+}
+
 // Calcula el saldo actual de una tarjeta desde el ledger
 export function calcularSaldo(tarjeta, movimientos) {
-  const movsTarjeta = movimientos.filter(m => m.tarjeta_id === tarjeta.id);
+  const movsTarjeta = movimientos.filter(m => movPerteneceATarjeta(m, tarjeta));
   const totalRecargas = movsTarjeta
     .filter(m => m.tipo === 'RECARGA')
     .reduce((sum, m) => sum + (m.monto || 0), 0);

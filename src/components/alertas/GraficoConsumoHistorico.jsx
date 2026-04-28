@@ -6,7 +6,7 @@ import {
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-lg p-3 text-xs">
+    <div className="glass rounded-xl p-3 text-xs">
       <p className="font-semibold text-slate-700 mb-1.5">{label}</p>
       {payload.map(p => (
         <div key={p.dataKey} className="flex items-center gap-2 mb-0.5">

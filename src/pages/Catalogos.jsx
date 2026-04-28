@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Plus, Pencil, Power, Trash2, CreditCard, Fuel, DollarSign, UserCheck, AlertTriangle } from 'lucide-react';
 import StatusBadge from '@/components/ui-helpers/StatusBadge';
@@ -550,23 +550,39 @@ function TabConductores() {
 
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
 export default function Catalogos() {
+  const [tab, setTab] = useState('tarjetas');
+  const TABS = [
+    { value: 'tarjetas',     label: 'Tarjetas',      icon: <CreditCard className="w-3.5 h-3.5" /> },
+    { value: 'combustibles', label: 'Combustibles',   icon: <Fuel       className="w-3.5 h-3.5" /> },
+    { value: 'precios',      label: 'Precios',        icon: <DollarSign className="w-3.5 h-3.5" /> },
+    { value: 'conductores',  label: 'Conductores',    icon: <UserCheck  className="w-3.5 h-3.5" /> },
+  ];
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold text-slate-800">Catálogos</h1>
         <p className="text-xs text-slate-400">Datos base del sistema: tarjetas, combustibles, precios y conductores</p>
       </div>
-      <Tabs defaultValue="tarjetas">
-        <TabsList className="w-full grid grid-cols-4">
-          <TabsTrigger value="tarjetas" className="gap-1 text-xs"><CreditCard className="w-3.5 h-3.5" /> Tarjetas</TabsTrigger>
-          <TabsTrigger value="combustibles" className="gap-1 text-xs"><Fuel className="w-3.5 h-3.5" /> Combustibles</TabsTrigger>
-          <TabsTrigger value="precios" className="gap-1 text-xs"><DollarSign className="w-3.5 h-3.5" /> Precios</TabsTrigger>
-          <TabsTrigger value="conductores" className="gap-1 text-xs"><UserCheck className="w-3.5 h-3.5" /> Conductores</TabsTrigger>
-        </TabsList>
-        <TabsContent value="tarjetas" className="mt-4"><TabTarjetas /></TabsContent>
-        <TabsContent value="combustibles" className="mt-4"><TabCombustibles /></TabsContent>
-        <TabsContent value="precios" className="mt-4"><TabPrecios /></TabsContent>
-        <TabsContent value="conductores" className="mt-4"><TabConductores /></TabsContent>
+      <div className="flex gap-0.5 flex-wrap border-b border-slate-200 dark:border-slate-700">
+        {TABS.map(({ value: v, label, icon }) => (
+          <button
+            key={v}
+            onClick={() => setTab(v)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t border-b-2 transition-colors -mb-px ${
+              tab === v
+                ? 'border-sky-500 text-sky-700 dark:text-sky-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+          >
+            {icon}{label}
+          </button>
+        ))}
+      </div>
+      <Tabs value={tab}>
+        <TabsContent value="tarjetas"     className="mt-0"><TabTarjetas /></TabsContent>
+        <TabsContent value="combustibles" className="mt-0"><TabCombustibles /></TabsContent>
+        <TabsContent value="precios"      className="mt-0"><TabPrecios /></TabsContent>
+        <TabsContent value="conductores"  className="mt-0"><TabConductores /></TabsContent>
       </Tabs>
     </div>
   );

@@ -85,4 +85,112 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  .dark {
+    color-scheme: dark;
+  }
 }
+
+/* ─── Glassmorphism ─────────────────────────────────────────────────────────
+ * Las reglas fuera de @layer tienen mayor prioridad de cascada que las
+ * @layer utilities de Tailwind, por lo que sobreescriben sin !important.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/* Todos los Card de shadcn (usan bg-card) se vuelven paneles de vidrio */
+.bg-card {
+  background-color: rgba(255, 255, 255, 0.60);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.dark .bg-card {
+  background-color: rgba(15, 23, 42, 0.55);
+}
+
+/* Clase utilitaria para cualquier elemento no-Card */
+.glass {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255,255,255,0.8);
+}
+.dark .glass {
+  background: rgba(15, 23, 42, 0.50);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+/* Panel de vidrio más sutil (para acordeones, headers secundarios) */
+.glass-subtle {
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+.dark .glass-subtle {
+  background: rgba(15, 23, 42, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/*
+ * Cobertura amplia de dark mode para colores hardcodeados en componentes custom.
+ * Estos selectores (dos clases) tienen mayor especificidad que las utilities de
+ * Tailwind (@layer utilities = una clase), por lo que sobreescriben sin !important.
+ * Los componentes shadcn usan bg-card, bg-background, etc. (CSS vars) → no se ven
+ * afectados por estas reglas.
+ */
+.dark .bg-white          { background-color: hsl(222 47% 11%); }
+.dark .bg-slate-50       { background-color: hsl(215 28% 15%); }
+.dark .bg-slate-100      { background-color: hsl(215 25% 19%); }
+.dark .bg-slate-800      { background-color: hsl(215 25% 19%); }
+
+.dark .border-slate-50   { border-color: hsl(215 25% 22%); }
+.dark .border-slate-100  { border-color: hsl(215 22% 26%); }
+.dark .border-slate-200  { border-color: hsl(215 18% 30%); }
+
+.dark .text-slate-800    { color: hsl(210 40% 92%); }
+.dark .text-slate-700    { color: hsl(215 20% 80%); }
+.dark .text-slate-600    { color: hsl(215 16% 65%); }
+.dark .text-slate-500    { color: hsl(215 14% 53%); }
+
+.dark .hover\:bg-slate-50:hover  { background-color: hsl(215 25% 19%); }
+.dark .hover\:bg-slate-100:hover { background-color: hsl(215 22% 23%); }
+
+.dark .divide-slate-100 > * + * { border-color: hsl(215 22% 22%); }
+.dark .divide-slate-50  > * + * { border-color: hsl(215 25% 19%); }
+
+/* Fondos coloreados claros → versiones oscuras */
+.dark .bg-sky-50         { background-color: hsl(204 80% 10%); }
+.dark .bg-amber-50       { background-color: hsl(43 80% 10%); }
+.dark .bg-red-50         { background-color: hsl(0 60% 12%); }
+.dark .bg-emerald-50     { background-color: hsl(152 60% 10%); }
+.dark .bg-purple-50      { background-color: hsl(270 60% 12%); }
+.dark .bg-violet-50      { background-color: hsl(262 60% 12%); }
+.dark .bg-orange-50      { background-color: hsl(24  80% 10%); }
+.dark .bg-orange-100     { background-color: hsl(24  70% 14%); }
+.dark .bg-sky-100        { background-color: hsl(204 70% 12%); }
+.dark .bg-emerald-100    { background-color: hsl(152 60% 10%); }
+.dark .bg-red-100        { background-color: hsl(0   60% 12%); }
+
+/* Opacity-modified utility variants (e.g. bg-slate-50/50) are different
+ * CSS classes and are not matched by the plain selectors above. */
+.dark .bg-slate-50\/50   { background-color: hsl(215 28% 13%); }
+.dark .bg-slate-50\/60   { background-color: hsl(215 28% 14%); }
+.dark .bg-slate-50\/80   { background-color: hsl(215 28% 15%); }
+.dark .bg-slate-100\/80  { background-color: hsl(215 25% 17%); }
+.dark .bg-white\/30      { background-color: hsl(222 47% 11% / 30%); }
+.dark .bg-white\/50      { background-color: hsl(222 47% 11% / 50%); }
+.dark .bg-white\/60      { background-color: hsl(222 47% 11% / 60%); }
+.dark .bg-white\/70      { background-color: hsl(222 47% 11% / 70%); }
+.dark .bg-white\/80      { background-color: hsl(222 47% 11% / 80%); }
+
+.dark .bg-slate-50\/30   { background-color: hsl(215 28% 13% / 30%); }
+.dark .bg-sky-50\/40     { background-color: hsl(204 80% 10% / 40%); }
+.dark .bg-red-50\/30     { background-color: hsl(0   60% 12% / 30%); }
+.dark .bg-violet-50\/30  { background-color: hsl(262 60% 12% / 30%); }
+.dark .bg-emerald-50\/30 { background-color: hsl(152 60% 10% / 30%); }
+
+.dark .hover\:bg-slate-50\/60:hover  { background-color: hsl(215 25% 19%); }
+.dark .hover\:bg-slate-50\/80:hover  { background-color: hsl(215 25% 19%); }
+.dark .hover\:bg-white\/50:hover     { background-color: hsl(222 47% 14%); }
+

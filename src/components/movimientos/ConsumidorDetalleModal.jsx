@@ -39,6 +39,10 @@ export default function ConsumidorDetalleModal({ consumidorId, todosMovimientos,
   const dt = consumidor.datos_tanque;
   const de = consumidor.datos_equipo;
 
+  const hasVehicleData = dv && (dv.marca || dv.modelo || dv.anio || dv.capacidad_tanque || dv.indice_consumo_fabricante || dv.indice_consumo_real || dv.estado_vehiculo || dv.umbral_alerta_pct != null || dv.umbral_critico_pct != null);
+  const hasTankData    = dt && (dt.capacidad_litros || dt.ubicacion || dt.stock_minimo);
+  const hasEquipData   = de && (de.categoria || de.marca || de.modelo || de.unidad_medida_consumo || de.indice_consumo_referencia);
+
   return (
     <Dialog open={!!consumidorId} onOpenChange={onClose}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
@@ -88,7 +92,7 @@ export default function ConsumidorDetalleModal({ consumidorId, todosMovimientos,
         </div>
 
         {/* Datos vehículo */}
-        {dv && (
+        {hasVehicleData && (
           <div className="mt-3">
             <p className="text-[10px] text-slate-400 uppercase font-semibold mb-1 flex items-center gap-1">
               <Truck className="w-3 h-3" /> Datos del vehículo
@@ -105,7 +109,7 @@ export default function ConsumidorDetalleModal({ consumidorId, todosMovimientos,
         )}
 
         {/* Datos tanque */}
-        {dt && (
+        {hasTankData && (
           <div className="mt-3">
             <p className="text-[10px] text-slate-400 uppercase font-semibold mb-1 flex items-center gap-1">
               <Package className="w-3 h-3" /> Datos del tanque
@@ -117,7 +121,7 @@ export default function ConsumidorDetalleModal({ consumidorId, todosMovimientos,
         )}
 
         {/* Datos equipo */}
-        {de && (
+        {hasEquipData && (
           <div className="mt-3">
             <p className="text-[10px] text-slate-400 uppercase font-semibold mb-1 flex items-center gap-1">
               <Fuel className="w-3 h-3" /> Datos del equipo

@@ -8,8 +8,7 @@ import { X } from 'lucide-react';
 
 const EMPTY = { fechaDesde: '', fechaHasta: '', tipo: 'all', tipoConsumidor: 'all', consumidor: 'all', tarjeta: 'all', chapa: '' };
 
-export default function MovimientosFiltros({ filters, onChange, consumidores, tiposConsumidor, combustibles, tarjetas }) {
-  // Consumidores filtrados por tipo seleccionado
+export default function MovimientosFiltros({ filters, onChange, consumidores, tiposConsumidor, tarjetas }) {
   const consumidoresFiltrados = useMemo(() => {
     if (filters.tipoConsumidor === 'all') return consumidores;
     return consumidores.filter(c => c.tipo_consumidor_id === filters.tipoConsumidor);
@@ -19,7 +18,6 @@ export default function MovimientosFiltros({ filters, onChange, consumidores, ti
   const activeCount = Object.entries(filters).filter(([k, v]) => v && v !== 'all').length;
 
   const set = (key, value) => {
-    // Si cambia el tipo de consumidor, resetear el consumidor seleccionado
     if (key === 'tipoConsumidor') {
       onChange({ ...filters, tipoConsumidor: value, consumidor: 'all' });
     } else {
@@ -32,7 +30,7 @@ export default function MovimientosFiltros({ filters, onChange, consumidores, ti
   return (
     <Card className="border-0 shadow-sm">
       <CardContent className="p-4 space-y-3">
-        {/* Fila 1: Fechas + Tipo movimiento */}
+        {/* Fila 1: Fechas + Tipo movimiento + Tarjeta */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <label className="text-xs text-slate-500 font-medium">Fecha desde</label>
@@ -66,8 +64,8 @@ export default function MovimientosFiltros({ filters, onChange, consumidores, ti
           </div>
         </div>
 
-        {/* Fila 2: Consumidor (tipo → subtipo) + Combustible */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        {/* Fila 2: Tipo consumidor + Consumidor + Chapa */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="text-xs text-slate-500 font-medium">Tipo de consumidor</label>
             <Select value={filters.tipoConsumidor} onValueChange={v => set('tipoConsumidor', v)}>
@@ -96,16 +94,6 @@ export default function MovimientosFiltros({ filters, onChange, consumidores, ti
                     {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
                   </SelectItem>
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 font-medium">Combustible</label>
-            <Select value={filters.tipoCombustible} onValueChange={v => set('tipoCombustible', v)}>
-              <SelectTrigger className="mt-1 text-xs h-8"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {combustibles.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

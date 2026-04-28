@@ -29,7 +29,7 @@ const TIPO_CONFIG = {
 };
 
 export default function Movimientos() {
-  const { canDelete, canWrite, canRecargar } = useUserRole();
+  const { canDelete, canWrite, canRecargar, isEconomico } = useUserRole();
   const queryClient = useQueryClient();
 
   const { data: movimientos = [], isLoading } = useQuery({
@@ -83,6 +83,7 @@ export default function Movimientos() {
   const filtered = useMemo(() => {
     const consumidorById = Object.fromEntries(consumidores.map(c => [c.id, c]));
     return movimientos.filter(m => {
+      if (isEconomico && m.tipo === 'DESPACHO') return false;
       if (filters.fechaDesde && m.fecha < filters.fechaDesde) return false;
       if (filters.fechaHasta && m.fecha > filters.fechaHasta) return false;
       if (filters.tipo !== 'all' && m.tipo !== filters.tipo) return false;

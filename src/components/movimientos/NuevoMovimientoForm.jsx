@@ -14,7 +14,7 @@ import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 export default function NuevoMovimientoForm({ onSuccess }) {
   const queryClient = useQueryClient();
-  const { canRecargar, canComprarDespachar } = useUserRole();
+  const { canRecargar, canComprar, canDespachar } = useUserRole();
 
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
@@ -33,8 +33,13 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       { value: 'COMPRA',   label: 'Compra',   Icon: ArrowDownCircle, activeClass: 'data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700' },
       { value: 'DESPACHO', label: 'Despacho', Icon: ArrowLeftRight,  activeClass: 'data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700' },
     ];
-    return all.filter(t => t.value === 'RECARGA' ? canRecargar : canComprarDespachar);
-  }, [canRecargar, canComprarDespachar]);
+    return all.filter(t => {
+      if (t.value === 'RECARGA')  return canRecargar;
+      if (t.value === 'COMPRA')   return canComprar;
+      if (t.value === 'DESPACHO') return canDespachar;
+      return false;
+    });
+  }, [canRecargar, canComprar, canDespachar]);
 
   const [tipo, setTipo] = useState('COMPRA');
 
@@ -53,6 +58,8 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     litros: '',
     monto: '',
     odometro: '',
+    horas_uso: '',
+    nivel_tanque: '',
     referencia: '',
   });
   const [errors, setErrors] = useState({});
@@ -97,9 +104,8 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     const n = (c.tipo_consumidor_nombre || '').toLowerCase();
     return n.includes('tanque') || n.includes('reserva');
   };
-  const consumidoresParaCompra = useMemo(() =>
-    consumidoresFiltradosPorTipo.filter(c => !esAlmacenamientoConsumidor(c)),
-  [consumidoresFiltradosPorTipo]);
+  // Para COMPRA se permiten todos los consumidores incluyendo tanques/reservas
+  const consumidoresParaCompra = consumidoresFiltradosPorTipo;
   const consumidoresParaDespachoDestino = useMemo(() =>
     consumidoresFiltradosPorTipo.filter(c => !esTanqueOReserva(c)),
   [consumidoresFiltradosPorTipo]);
@@ -172,6 +178,24 @@ export default function NuevoMovimientoForm({ onSuccess }) {
   }, [form.consumidor_id, movimientos]);
 
   const ultimoOdometro = ultimoMovConOdometro?.odometro ?? null;
+
+  const consumidorEsEquipo = useMemo(() => {
+    const n = (consumidorSeleccionado?.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
+  }, [consumidorSeleccionado]);
+
+  const consumidorEsTanque = useMemo(() => {
+    const n = (consumidorSeleccionado?.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('tanque') || n.includes('reserva') || n.includes('almac');
+  }, [consumidorSeleccionado]);
+
+  const ultimasHorasEquipo = useMemo(() => {
+    if (!form.consumidor_id || !consumidorEsEquipo) return null;
+    const movs = movimientos
+      .filter(m => m.consumidor_id === form.consumidor_id && m.horas_uso != null)
+      .sort((a, b) => b.horas_uso - a.horas_uso);
+    return movs.length > 0 ? movs[0].horas_uso : null;
+  }, [form.consumidor_id, movimientos, consumidorEsEquipo]);
 
   const litrosReales = useMemo(() => {
     if (!form.litros || parseFloat(form.litros) <= 0) return null;
@@ -342,10 +366,15 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       data.combustible_estimado_post = auditoriaCompra?.combustibleEstimadoPost ?? null;
       data.capacidad_tanque = capacidadTanque;
       data.auditoria_combustible_estado = auditoriaCompra?.estado || AUDITORIA_ESTADO.SIN_ESTIMACION;
-      if (form.odometro) data.odometro = parseFloat(form.odometro);
-      if (ultimoOdometro != null) data.odometro_anterior = ultimoOdometro;
-      if (kmRecorridos != null && requiereOdometro) data.km_recorridos = kmRecorridos;
-      if (consumoRealCalculado != null && requiereOdometro) data.consumo_real = consumoRealCalculado;
+      if (consumidorEsEquipo) {
+        if (form.horas_uso) data.horas_uso = parseFloat(form.horas_uso);
+      } else {
+        if (form.odometro) data.odometro = parseFloat(form.odometro);
+        if (ultimoOdometro != null) data.odometro_anterior = ultimoOdometro;
+        if (kmRecorridos != null && requiereOdometro) data.km_recorridos = kmRecorridos;
+        if (consumoRealCalculado != null && requiereOdometro) data.consumo_real = consumoRealCalculado;
+      }
+      if (form.nivel_tanque) data.nivel_tanque = parseFloat(form.nivel_tanque);
     } else if (tipo === 'RECARGA') {
       data.tarjeta_id = tarjeta.id;
       data.tarjeta_alias = tarjeta.alias || tarjeta.id_tarjeta;
@@ -363,7 +392,12 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       data.combustible_id = combustible.id;
       data.combustible_nombre = combustible.nombre;
       data.litros = parseFloat(form.litros);
-      if (form.odometro) data.odometro = parseFloat(form.odometro);
+      if (consumidorEsEquipo) {
+        if (form.horas_uso) data.horas_uso = parseFloat(form.horas_uso);
+      } else {
+        if (form.odometro) data.odometro = parseFloat(form.odometro);
+      }
+      if (form.nivel_tanque) data.nivel_tanque = parseFloat(form.nivel_tanque);
       data.referencia = form.referencia;
     }
     createMutation.mutate(data);
@@ -425,7 +459,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Filtrar tipo" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {tiposConsumidor.filter(t => t.activo !== false && !esAlmacenamientoConsumidor({ tipo_consumidor_nombre: t.nombre })).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
+                  {tiposConsumidor.filter(t => t.activo !== false).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -472,7 +506,7 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 <span className="text-lg font-bold text-slate-800">{formatMonto(montoCalculado, tarjetaSeleccionada?.moneda)}</span>
               </div>
             )}
-            {auditoriaCompra && (
+            {auditoriaCompra && !consumidorEsTanque && (
               <div className={`rounded-xl p-3 border text-xs space-y-1 ${
                 auditoriaCompra.estado === AUDITORIA_ESTADO.EXCESO
                   ? 'bg-red-50 border-red-200 text-red-700'
@@ -487,52 +521,94 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               </div>
             )}
 
-            {/* Odómetro - requerido solo para tipos que lo necesitan */}
-            <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 dark:border-red-800/60 bg-red-50/30 dark:bg-red-900/20' : 'border-sky-100 dark:border-sky-800/50 bg-sky-50/40 dark:bg-sky-900/20'}`}>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
-                <Gauge className="w-3.5 h-3.5" />
-                Odómetro actual {requiereOdometro && <span className="text-red-400">*</span>}
-                {ultimoOdometro != null && (
-                  <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimoOdometro.toLocaleString()} km</span>
-                )}
-              </div>
+            {/* Nivel en tanque y odómetro solo para vehículos/equipos, no para tanques/reservas */}
+            {!consumidorEsTanque && (
+            <div className="border border-slate-100 rounded-xl p-3 space-y-1.5 bg-slate-50/60">
+              <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                Nivel en tanque antes de cargar
+                <span className="font-normal text-slate-400">(opcional)</span>
+              </Label>
               <Input
                 type="number"
-                min={ultimoOdometro != null ? ultimoOdometro + 1 : 0}
-                step="1"
-                value={form.odometro}
-                onChange={e => set('odometro', e.target.value)}
-                placeholder="Lectura actual (km)"
-                className={errors.odometro ? 'border-red-300 focus-visible:ring-red-300' : ''}
+                step="0.1"
+                min="0"
+                value={form.nivel_tanque}
+                onChange={e => set('nivel_tanque', e.target.value)}
+                placeholder="Litros actuales en el tanque"
+                className="mt-0.5"
               />
-              {!requiereOdometro && (
-                <p className="text-[11px] text-slate-400">No obligatorio para el tipo de consumidor seleccionado.</p>
-              )}
-              {errors.odometro && <p className="text-xs text-red-500">{errors.odometro}</p>}
-              {kmRecorridos != null && (
-                <div className="flex justify-between text-xs text-slate-500 pt-1 flex-wrap gap-1">
-                  <span>Km recorridos: <b className="text-slate-700">{kmRecorridos.toFixed(0)} km</b></span>
-                  {consumoRealCalculado != null && (
-                    <span>Consumo real: <b className="text-sky-700">{consumoRealCalculado.toFixed(2)} km/L</b></span>
+              <p className="text-[11px] text-slate-400">Lectura del tanque del vehículo antes de cargar. Ayuda a verificar consumo real.</p>
+            </div>
+            )}
+
+            {/* Horas de uso (equipos/generadores) o Odómetro (vehículos) — oculto para tanques/reservas */}
+            {!consumidorEsTanque && (consumidorEsEquipo ? (
+              <div className={`border rounded-xl p-3 space-y-2 ${errors.horas_uso ? 'border-red-200 bg-red-50/30' : 'border-amber-100 bg-amber-50/40'}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700">
+                  <Gauge className="w-3.5 h-3.5" />
+                  Horas de uso (lectura acumulada)
+                  {ultimasHorasEquipo != null && (
+                    <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimasHorasEquipo.toLocaleString()} h</span>
                   )}
                 </div>
-              )}
-              {/* Alerta de anomalía de consumo */}
-              {anomaliaConsumo && (
-                <div className={`flex items-start gap-1.5 text-xs rounded-lg px-2.5 py-2 mt-1 ${
-                  anomaliaConsumo.nivel === 'critico'
-                    ? 'bg-red-50 text-red-700 border border-red-200'
-                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                }`}>
-                  <span className="mt-0.5">⚠</span>
-                  <span>
-                    <b>{anomaliaConsumo.nivel === 'critico' ? 'Consumo crítico' : 'Consumo alto'}:</b>{' '}
-                    {consumoRealCalculado.toFixed(2)} km/L vs referencia {consumoReferencia.toFixed(2)} km/L
-                    {' '}({anomaliaConsumo.desviacion.toFixed(0)}% de desviación)
-                  </span>
+                <Input
+                  type="number"
+                  min={ultimasHorasEquipo != null ? ultimasHorasEquipo + 0.1 : 0}
+                  step="0.1"
+                  value={form.horas_uso}
+                  onChange={e => set('horas_uso', e.target.value)}
+                  placeholder="Lectura actual (h)"
+                  className={errors.horas_uso ? 'border-red-300 focus-visible:ring-red-300' : ''}
+                />
+                {errors.horas_uso && <p className="text-xs text-red-500">{errors.horas_uso}</p>}
+                <p className="text-[11px] text-slate-400">Lectura del horómetro al momento de la carga.</p>
+              </div>
+            ) : (
+              <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 dark:border-red-800/60 bg-red-50/30 dark:bg-red-900/20' : 'border-sky-100 dark:border-sky-800/50 bg-sky-50/40 dark:bg-sky-900/20'}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
+                  <Gauge className="w-3.5 h-3.5" />
+                  Odómetro actual {requiereOdometro && <span className="text-red-400">*</span>}
+                  {ultimoOdometro != null && (
+                    <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimoOdometro.toLocaleString()} km</span>
+                  )}
                 </div>
-              )}
-            </div>
+                <Input
+                  type="number"
+                  min={ultimoOdometro != null ? ultimoOdometro + 1 : 0}
+                  step="1"
+                  value={form.odometro}
+                  onChange={e => set('odometro', e.target.value)}
+                  placeholder="Lectura actual (km)"
+                  className={errors.odometro ? 'border-red-300 focus-visible:ring-red-300' : ''}
+                />
+                {!requiereOdometro && (
+                  <p className="text-[11px] text-slate-400">No obligatorio para el tipo de consumidor seleccionado.</p>
+                )}
+                {errors.odometro && <p className="text-xs text-red-500">{errors.odometro}</p>}
+                {kmRecorridos != null && (
+                  <div className="flex justify-between text-xs text-slate-500 pt-1 flex-wrap gap-1">
+                    <span>Km recorridos: <b className="text-slate-700">{kmRecorridos.toFixed(0)} km</b></span>
+                    {consumoRealCalculado != null && (
+                      <span>Consumo real: <b className="text-sky-700">{consumoRealCalculado.toFixed(2)} km/L</b></span>
+                    )}
+                  </div>
+                )}
+                {anomaliaConsumo && (
+                  <div className={`flex items-start gap-1.5 text-xs rounded-lg px-2.5 py-2 mt-1 ${
+                    anomaliaConsumo.nivel === 'critico'
+                      ? 'bg-red-50 text-red-700 border border-red-200'
+                      : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}>
+                    <span className="mt-0.5">⚠</span>
+                    <span>
+                      <b>{anomaliaConsumo.nivel === 'critico' ? 'Consumo crítico' : 'Consumo alto'}:</b>{' '}
+                      {consumoRealCalculado.toFixed(2)} km/L vs referencia {consumoReferencia.toFixed(2)} km/L
+                      {' '}({anomaliaConsumo.desviacion.toFixed(0)}% de desviación)
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
           </>
         )}
 
@@ -620,32 +696,71 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               <Input type="number" step="0.01" min="0.01" value={form.litros} onChange={e => set('litros', e.target.value)} placeholder="0.00" className="mt-1" />
               {errors.litros && <p className="text-xs text-red-500 mt-1">{errors.litros}</p>}
             </div>
+            {/* Nivel en tanque al momento del despacho */}
+            <div className="border border-slate-100 rounded-xl p-3 space-y-1.5 bg-slate-50/60">
+              <Label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                Nivel en tanque antes de recibir
+                <span className="font-normal text-slate-400">(opcional)</span>
+              </Label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                value={form.nivel_tanque}
+                onChange={e => set('nivel_tanque', e.target.value)}
+                placeholder="Litros actuales en el tanque"
+                className="mt-0.5"
+              />
+              <p className="text-[11px] text-slate-400">Lectura del tanque antes del despacho. Ayuda a verificar consumo real.</p>
+            </div>
             <div>
               <Label className="text-xs text-slate-500">Referencia (opcional)</Label>
               <Input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="Nota..." className="mt-1" />
             </div>
-            <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 bg-red-50/30' : 'border-purple-100 bg-purple-50/40'}`}>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-700">
-                <Gauge className="w-3.5 h-3.5" />
-                Odómetro despacho {requiereOdometro && <span className="text-red-400">*</span>}
-                {ultimoOdometro != null && (
-                  <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimoOdometro.toLocaleString()} km</span>
-                )}
+            {consumidorEsEquipo ? (
+              <div className={`border rounded-xl p-3 space-y-2 ${errors.horas_uso ? 'border-red-200 bg-red-50/30' : 'border-amber-100 bg-amber-50/40'}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700">
+                  <Gauge className="w-3.5 h-3.5" />
+                  Horas de uso (lectura acumulada)
+                  {ultimasHorasEquipo != null && (
+                    <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimasHorasEquipo.toLocaleString()} h</span>
+                  )}
+                </div>
+                <Input
+                  type="number"
+                  min={ultimasHorasEquipo != null ? ultimasHorasEquipo + 0.1 : 0}
+                  step="0.1"
+                  value={form.horas_uso}
+                  onChange={e => set('horas_uso', e.target.value)}
+                  placeholder="Lectura actual (h)"
+                  className={errors.horas_uso ? 'border-red-300 focus-visible:ring-red-300' : ''}
+                />
+                {errors.horas_uso && <p className="text-xs text-red-500">{errors.horas_uso}</p>}
               </div>
-              <Input
-                type="number"
-                min={ultimoOdometro != null ? ultimoOdometro + 1 : 0}
-                step="1"
-                value={form.odometro}
-                onChange={e => set('odometro', e.target.value)}
-                placeholder="Lectura actual (km)"
-                className={errors.odometro ? 'border-red-300 focus-visible:ring-red-300' : ''}
-              />
-              {!requiereOdometro && (
-                <p className="text-[11px] text-slate-400">No obligatorio para reserva/tanque/equipo.</p>
-              )}
-              {errors.odometro && <p className="text-xs text-red-500">{errors.odometro}</p>}
-            </div>
+            ) : (
+              <div className={`border rounded-xl p-3 space-y-2 ${errors.odometro ? 'border-red-200 bg-red-50/30' : 'border-purple-100 bg-purple-50/40'}`}>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-purple-700">
+                  <Gauge className="w-3.5 h-3.5" />
+                  Odómetro despacho {requiereOdometro && <span className="text-red-400">*</span>}
+                  {ultimoOdometro != null && (
+                    <span className="font-normal text-slate-400 ml-auto">Anterior: {ultimoOdometro.toLocaleString()} km</span>
+                  )}
+                </div>
+                <Input
+                  type="number"
+                  min={ultimoOdometro != null ? ultimoOdometro + 1 : 0}
+                  step="1"
+                  value={form.odometro}
+                  onChange={e => set('odometro', e.target.value)}
+                  placeholder="Lectura actual (km)"
+                  className={errors.odometro ? 'border-red-300 focus-visible:ring-red-300' : ''}
+                />
+                {!requiereOdometro && (
+                  <p className="text-[11px] text-slate-400">No obligatorio para reserva/tanque/equipo.</p>
+                )}
+                {errors.odometro && <p className="text-xs text-red-500">{errors.odometro}</p>}
+              </div>
+            )}
           </>
         )}
       </div>

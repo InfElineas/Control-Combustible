@@ -2,16 +2,17 @@ import React, { useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertTriangle, CreditCard, ArrowLeftRight, TrendingDown, TrendingUp, Users, CalendarDays, User, Zap } from 'lucide-react';
+import { AlertTriangle, TrendingDown, TrendingUp, Users, CalendarDays, User, ChevronDown } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
+import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import GastosMensualesChart from '@/components/dashboard/GastosMensualesChart';
 import ConsumidoresPorTipo from '@/components/dashboard/ConsumidoresPorTipo';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { filterMovimientosByMonth, getMonthOptionsFromMovimientos, computeChoferDelMes, computeEquipoStats } from '@/lib/fuel-analytics';
+import { filterMovimientosByMonth, getMonthOptionsFromMovimientos, computeChoferDelMes } from '@/lib/fuel-analytics';
+import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
   return (
@@ -23,9 +24,26 @@ function SectionTitle({ icon: Icon, title, iconColor = 'text-slate-400' }) {
 }
 
 export default function Dashboard() {
+  const { role: rawRole } = useUserRole();
+  const role = rawRole === 'admin' ? 'superadmin' : rawRole;
+  const isOperador = role === 'operador';
+  const isEconomico = role === 'economico';
+
   const [mesFiltro, setMesFiltro] = useState('ALL');
   const [statModal, setStatModal] = useState({ open: false, tipo: null });
   const [modalGrupoIdx, setModalGrupoIdx] = useState(0);
+  const [expandedComb, setExpandedComb] = useState(new Set());
+  const toggleComb = (nombre) => setExpandedComb(prev => {
+    const next = new Set(prev);
+    next.has(nombre) ? next.delete(nombre) : next.add(nombre);
+    return next;
+  });
+  const [expandedCompras, setExpandedCompras] = useState(new Set());
+  const toggleCompras = (nombre) => setExpandedCompras(prev => {
+    const next = new Set(prev);
+    next.has(nombre) ? next.delete(nombre) : next.add(nombre);
+    return next;
+  });
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-fecha', 1000) });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
@@ -164,24 +182,30 @@ export default function Dashboard() {
 
       const detalleConsumoReservaMap = {};
       despachosReservaPeriodo.forEach(m => {
-        const key = m.consumidor_nombre || 'Sin identificar';
-        if (!detalleConsumoReservaMap[key]) detalleConsumoReservaMap[key] = { litros: 0, monto: 0 };
+        const key = m.consumidor_id || m.consumidor_nombre || 'Sin identificar';
+        if (!detalleConsumoReservaMap[key]) detalleConsumoReservaMap[key] = {
+          nombre: m.consumidor_nombre || 'Sin identificar',
+          chapa: m.vehiculo_chapa || null,
+          litros: 0, monto: 0,
+        };
         detalleConsumoReservaMap[key].litros += m.litros || 0;
         detalleConsumoReservaMap[key].monto += m.monto || 0;
       });
-      const detalleConsumoReserva = Object.entries(detalleConsumoReservaMap)
-        .map(([nombre, data]) => ({ nombre, ...data }))
+      const detalleConsumoReserva = Object.values(detalleConsumoReservaMap)
         .sort((a, b) => b.litros - a.litros);
 
       const detalleConsumoMap = {};
       despachosPeriodo.forEach(m => {
-        const key = m.consumidor_nombre || 'Sin identificar';
-        if (!detalleConsumoMap[key]) detalleConsumoMap[key] = { litros: 0, monto: 0 };
+        const key = m.consumidor_id || m.consumidor_nombre || 'Sin identificar';
+        if (!detalleConsumoMap[key]) detalleConsumoMap[key] = {
+          nombre: m.consumidor_nombre || 'Sin identificar',
+          chapa: m.vehiculo_chapa || null,
+          litros: 0, monto: 0,
+        };
         detalleConsumoMap[key].litros += m.litros || 0;
         detalleConsumoMap[key].monto += m.monto || 0;
       });
-      const detalleConsumo = Object.entries(detalleConsumoMap)
-        .map(([nombre, data]) => ({ nombre, ...data }))
+      const detalleConsumo = Object.values(detalleConsumoMap)
         .sort((a, b) => b.litros - a.litros);
 
       const ultimaCompra = comprasPeriodo[0] || comprasHistoricas[0] || null;
@@ -222,6 +246,7 @@ export default function Dashboard() {
         montoTotalDisponibleReserva,
         detalleConsumoReserva,
         detalleConsumo,
+        comprasPeriodo,
         ultimaCargaReservaFecha,
       };
     }).filter(r => r.litrosCompras > 0 || r.litrosConsumo > 0 || r.litrosInicio > 0 || r.litrosEnTanqueEstimado > 0);
@@ -250,49 +275,6 @@ export default function Dashboard() {
     return desviacion >= umbralCritico;
   });
 
-  // Tarjetas
-  const tarjetasActivas = tarjetas.filter(t => t.activa);
-  const saldos = tarjetasActivas.map(t => ({ ...t, saldo: calcularSaldo(t, movimientos) }));
-
-  // Stock en reserva (consumidores tanque/reserva - basado en compras y despachos)
-  const stockReserva = (() => {
-    const map = {};
-    consumidores.forEach((c) => {
-      const esTanque = c?.tipo_consumidor_nombre?.toLowerCase().includes('tanque')
-        || c?.tipo_consumidor_nombre?.toLowerCase().includes('reserva');
-      if (!esTanque) return;
-      const key = c.combustible_nombre || tipoCombustible.find(tc => tc.id === c.combustible_id)?.nombre;
-      if (!key) return;
-      map[key] = (map[key] || 0) + (Number(c.litros_iniciales) || 0);
-    });
-    movimientos.filter(m => m.tipo === 'COMPRA' && m.litros && m.consumidor_id).forEach(m => {
-      const con = consumidores.find(c => c.id === m.consumidor_id);
-      const esTanque = con?.tipo_consumidor_nombre?.toLowerCase().includes('tanque')
-        || con?.tipo_consumidor_nombre?.toLowerCase().includes('reserva');
-      if (!esTanque) return;
-      const k = m.combustible_nombre || '?';
-      map[k] = (map[k] || 0) + (m.litros || 0);
-    });
-    movimientos.filter(m => m.tipo === 'DESPACHO' && m.litros).forEach(m => {
-      const k = m.combustible_nombre || '?';
-      if (map[k] != null) map[k] -= (m.litros || 0);
-    });
-    return map;
-  })();
-
-  const hayStockReserva = Object.keys(stockReserva).length > 0;
-  const categoriasReserva = useMemo(() => {
-    const rows = { Particular: 0, Cupet: 0, 'Almacén': 0 };
-    movimientosFiltrados
-      .filter(m => m.tipo === 'DESPACHO')
-      .forEach((m) => {
-        const raw = `${m.consumidor_origen_nombre || ''} ${m.referencia || ''}`.toLowerCase();
-        if (raw.includes('cupet')) rows.Cupet += m.litros || 0;
-        else if (raw.includes('almac')) rows['Almacén'] += m.litros || 0;
-        else rows.Particular += m.litros || 0;
-      });
-    return rows;
-  }, [movimientosFiltrados]);
 
   const movimientosFiltradosOrdenados = useMemo(
     () => [...movimientosFiltrados].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || ''))),
@@ -304,10 +286,6 @@ export default function Dashboard() {
     [mesFiltro, movimientos, conductores],
   );
 
-  const equipoStats = useMemo(
-    () => computeEquipoStats({ consumidores, movimientos, month: mesFiltro }),
-    [consumidores, movimientos, mesFiltro],
-  );
 
   const modalDataPorCard = useMemo(() => {
     const agruparPorCombustible = (rows) => {
@@ -341,7 +319,9 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-800">Panel Global</h1>
+        <h1 className="text-xl font-bold text-slate-800">
+          {isOperador ? 'Panel Operacional' : isEconomico ? 'Panel Financiero' : 'Panel Global'}
+        </h1>
         <p className="text-xs text-slate-400 mt-0.5">
           {hoy.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
@@ -409,8 +389,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Personal del mes */}
-      {choferDelMes && (
+      {/* Personal del mes — solo operacional */}
+      {!isEconomico && choferDelMes && (
         <div>
           <SectionTitle icon={User} title="Personal del mes" iconColor="text-amber-500" />
           <Card className="border-0 shadow-sm bg-amber-50/30 ring-1 ring-amber-100">
@@ -435,6 +415,18 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Gráfico gasto mensual — solo financiero */}
+      {!isOperador && (
+        <div>
+          <SectionTitle icon={TrendingUp} title="Gastos por mes (últimos 6 meses)" iconColor="text-sky-500" />
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-5">
+              <GastosMensualesChart movimientos={movimientos} />
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Resumen por combustible */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -447,49 +439,136 @@ export default function Dashboard() {
         {resumenPorCombustible.length === 0 ? (
           <p className="text-sm text-slate-400">No hay datos de consumo para el período seleccionado.</p>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
             {resumenPorCombustible.map(res => {
-              const saldoReservaL = Math.max(0, res.litrosTotalDisponibleReserva - res.litrosDespachosMes);
-              const saldoReservaMonto = Math.max(0, res.montoTotalDisponibleReserva - res.montoDespachosMes);
+              const isExpanded = expandedComb.has(res.nombreCombustible);
+              const isComprasExpanded = expandedCompras.has(res.nombreCombustible);
+              const CONSUMER_PREVIEW = 4;
+              const visibleConsumers = isExpanded ? res.detalleConsumo : res.detalleConsumo.slice(0, CONSUMER_PREVIEW);
+              const hasMore = res.detalleConsumo.length > CONSUMER_PREVIEW;
+              const comprasOrdenadas = [...res.comprasPeriodo].sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
               return (
                 <Card key={res.nombreCombustible} className="border border-slate-200 shadow-sm">
                   <CardContent className="p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold">{res.nombreCombustible}</h3>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">Precio {formatMoneySymbol(res.precioRef, res.moneda)}</Badge>
-                        {res.ultimaCargaReservaFecha && (
-                          <span className="text-[10px] text-slate-400">Última carga: {res.ultimaCargaReservaFecha}</span>
-                        )}
+                    {/* Header */}
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-slate-800">{res.nombreCombustible}</h3>
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        Precio {formatMoneySymbol(res.precioRef, res.moneda)}
+                      </Badge>
+                    </div>
+
+                    {/* Spreadsheet rows */}
+                    <div className="text-xs space-y-0">
+                      {/* Inicio período — solo si hay filtro de mes */}
+                      {mesFiltro !== 'ALL' && (
+                        <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+                          <span className="text-slate-500">Inicio período</span>
+                          <div className="flex items-center gap-3 text-right">
+                            <span className="font-semibold text-slate-700">{res.litrosInicio.toFixed(1)} L</span>
+                            <span className="text-slate-400 w-20 text-right">{formatMoneySymbol(res.montoInicio, res.moneda)}</span>
+                          </div>
+                        </div>
+                      )}
+                      {/* Compras — fila expandible */}
+                      <button
+                        onClick={() => toggleCompras(res.nombreCombustible)}
+                        className="w-full flex items-center justify-between py-1.5 border-b border-slate-100 hover:bg-slate-50 -mx-3 px-3 transition-colors"
+                      >
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <ChevronDown className={`w-3 h-3 transition-transform text-sky-500 ${isComprasExpanded ? 'rotate-180' : ''}`} />
+                          + Compras <span className="text-slate-400">({res.comprasOpsMes})</span>
+                        </span>
+                        <div className="flex items-center gap-3 text-right">
+                          <span className="font-semibold text-slate-700">{res.litrosCompras.toFixed(1)} L</span>
+                          <span className="text-slate-400 w-20 text-right">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
+                        </div>
+                      </button>
+                      {/* Detalle de compras expandido */}
+                      {isComprasExpanded && comprasOrdenadas.length > 0 && (
+                        <div className="bg-slate-50/80 -mx-3 px-3 pb-1 border-b border-slate-100">
+                          <div className="pt-1 space-y-0">
+                            {comprasOrdenadas.map(m => (
+                              <div key={m.id} className="py-1 border-b border-slate-100 last:border-0 space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-slate-400 tabular-nums shrink-0 w-20">{m.fecha}</span>
+                                  <span className="text-slate-600 truncate flex-1 min-w-0">
+                                    {m.consumidor_nombre || m.referencia || '—'}
+                                    {m.vehiculo_chapa && <span className="text-slate-400 ml-1 font-mono">[{m.vehiculo_chapa}]</span>}
+                                  </span>
+                                  <span className="text-slate-700 font-medium shrink-0">{(m.litros || 0).toFixed(1)} L</span>
+                                  <span className="text-slate-400 shrink-0 w-16 text-right">{formatMoneySymbol(m.monto, res.moneda)}</span>
+                                </div>
+                                {(m.tarjeta_alias || m.consumidor_origen_nombre) && (
+                                  <div className="flex items-center gap-1 pl-20">
+                                    <span className="text-[10px] text-slate-400">origen:</span>
+                                    <span className="text-[10px] font-medium text-sky-700 truncate">
+                                      {m.tarjeta_alias || m.consumidor_origen_nombre}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Total disponible */}
+                      <div className="flex items-center justify-between py-1.5 border-b border-slate-200 bg-slate-50 -mx-3 px-3">
+                        <span className="font-medium text-slate-600">= Total disponible</span>
+                        <div className="flex items-center gap-3 text-right">
+                          <span className="font-bold text-slate-800">{res.litrosDisponible.toFixed(1)} L</span>
+                          <span className="text-slate-500 w-20 text-right">{formatMoneySymbol(res.montoDisponible, res.moneda)}</span>
+                        </div>
+                      </div>
+
+                      {/* Consumo por consumidor (solo litros — DESPACHO no lleva importe) */}
+                      {res.detalleConsumo.length > 0 && (
+                        <div className="pt-1">
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wide pb-0.5">Consumo por consumidor</p>
+                          {visibleConsumers.map(d => (
+                            <div key={`${d.nombre}-${d.chapa}`} className="flex items-center justify-between py-1 border-b border-slate-50">
+                              <span className="text-slate-500 truncate max-w-[65%]">
+                                {d.nombre}
+                                {d.chapa && <span className="text-slate-400 ml-1 font-mono text-[10px]">[{d.chapa}]</span>}
+                              </span>
+                              <span className="text-slate-700 font-medium shrink-0">{d.litros.toFixed(1)} L</span>
+                            </div>
+                          ))}
+                          {hasMore && (
+                            <button
+                              onClick={() => toggleComb(res.nombreCombustible)}
+                              className="flex items-center gap-1 text-[10px] text-sky-600 mt-0.5 hover:underline"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              {isExpanded ? 'Ver menos' : `Ver ${res.detalleConsumo.length - CONSUMER_PREVIEW} más`}
+                            </button>
+                          )}
+                          {/* Total consumo */}
+                          <div className="flex items-center justify-between py-1.5 border-t border-slate-200 mt-0.5">
+                            <span className="font-medium text-slate-600">Total consumo <span className="text-slate-400">({res.despachosOpsCombMes})</span></span>
+                            <span className="font-bold text-slate-800">{res.litrosConsumo.toFixed(1)} L</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Saldo final */}
+                      <div className="flex items-center justify-between py-1.5 rounded-md bg-emerald-50 -mx-3 px-3 mt-1">
+                        <span className="font-semibold text-emerald-700">Saldo final</span>
+                        <div className="text-right">
+                          <span className="font-bold text-emerald-700">{res.litrosSaldoFinal.toFixed(1)} L</span>
+                          {res.precioRef > 0 && (
+                            <p className="text-[10px] text-emerald-600">≈ {formatMoneySymbol(res.litrosSaldoFinal * res.precioRef, res.moneda)}</p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-slate-400">Recargas (mes)</p>
-                        <p className="font-semibold">{res.recargasOpsMes} ops · {res.litrosComprasReservaMes.toFixed(1)} L</p>
-                        <p>{formatMoneySymbol(res.costoRecargasMes, res.moneda)}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-slate-400">Despachos (mes)</p>
-                        <p className="font-semibold">{res.despachosOpsMes} ops · {res.litrosDespachosMes.toFixed(1)} L</p>
-                        <p>{formatMoneySymbol(res.montoDespachosMes, res.moneda)}</p>
-                      </div>
-                      <div className="rounded-md bg-slate-50 p-2">
-                        <p className="text-slate-400">Capacidad reserva</p>
-                        <p className="font-semibold">{res.capacidadTotalReserva > 0 ? `${res.capacidadTotalReserva.toFixed(1)} L` : 'No registrada'}</p>
-                      </div>
-                      <div className="rounded-md bg-emerald-50 p-2">
-                        <p className="text-emerald-700">Saldo final reserva</p>
-                        <p className="font-bold text-emerald-700">{saldoReservaL.toFixed(1)} L</p>
-                        <p className="text-emerald-700">{formatMoneySymbol(saldoReservaMonto, res.moneda)}</p>
-                      </div>
-                    </div>
-                    <div className="flex justify-end pt-1">
+
+                    <div className="flex justify-end pt-0.5">
                       <Link
                         to={`${createPageUrl('Movimientos')}?combustible=${encodeURIComponent(res.nombreCombustible)}`}
                         className="text-[11px] text-sky-600 hover:underline"
                       >
-                        Ver movimientos de {res.nombreCombustible} →
+                        Ver movimientos →
                       </Link>
                     </div>
                   </CardContent>
@@ -601,8 +680,8 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* Alertas de consumo crítico */}
-      {alertasConsumo.length > 0 && (
+      {/* Alertas de consumo crítico — solo operacional */}
+      {!isEconomico && alertasConsumo.length > 0 && (
         <div className="space-y-2">
           {alertasConsumo.map(c => (
             <div key={c.id} className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm">
@@ -615,144 +694,20 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Equipo / Generadores */}
-      {equipoStats.length > 0 && (
+      {/* Consumidores por tipo — solo operacional */}
+      {!isEconomico && (
         <div>
-          <SectionTitle icon={Zap} title="Equipo / Generadores" iconColor="text-yellow-500" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {equipoStats.map(({ equipo, litrosMes, ultimaCargaFecha, combustible }) => (
-              <Card key={equipo.id} className="border-0 shadow-sm">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-700 truncate">{equipo.nombre}</p>
-                      {equipo.responsable && <p className="text-xs text-slate-400">{equipo.responsable}</p>}
-                    </div>
-                    <Badge variant="outline" className="text-[10px] shrink-0 border-orange-200 text-orange-700">{combustible}</Badge>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-slate-400">Litros del mes</p>
-                      <p className="font-semibold">{litrosMes > 0 ? `${litrosMes.toFixed(1)} L` : 'Sin datos'}</p>
-                    </div>
-                    <div className="rounded-md bg-slate-50 p-2">
-                      <p className="text-slate-400">Última carga</p>
-                      <p className="font-semibold">{ultimaCargaFecha || 'Sin datos'}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <SectionTitle icon={Users} title="Estado de consumidores" iconColor="text-slate-500" />
+          <ConsumidoresPorTipo
+            consumidores={consumidores}
+            tiposConsumidor={tiposConsumidor}
+            movimientos={movimientos}
+          />
+          <Link to={createPageUrl('Movimientos')} className="text-xs text-sky-600 hover:underline mt-3 inline-block">
+            Ver todos los movimientos →
+          </Link>
         </div>
       )}
-
-      {/* Gráfico gasto mensual */}
-      <div>
-        <SectionTitle icon={TrendingUp} title="Gastos por mes (últimos 6 meses)" iconColor="text-sky-500" />
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-4 pt-4">
-            <GastosMensualesChart movimientos={movimientos} />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Saldo por tarjeta */}
-      <div>
-        <SectionTitle icon={CreditCard} title="Saldo por tarjeta" iconColor="text-blue-500" />
-        {saldos.length === 0 ? (
-          <p className="text-sm text-slate-400">No hay tarjetas activas</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {saldos.map(t => {
-              const enAlerta = t.umbral_alerta != null && t.saldo < t.umbral_alerta;
-              const pct = t.umbral_alerta ? Math.min(100, Math.max(0, (t.saldo / (t.umbral_alerta * 3)) * 100)) : null;
-              return (
-                <Card key={t.id} className={`border-0 shadow-sm ${enAlerta ? 'ring-1 ring-amber-300 bg-amber-50/30' : ''}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-700 truncate">{t.alias || t.id_tarjeta}</p>
-                        <p className="text-[11px] text-slate-400 truncate">{t.id_tarjeta}</p>
-                      </div>
-                      <Badge variant="outline" className={`text-[10px] shrink-0 ml-2 ${enAlerta ? 'border-amber-300 text-amber-600' : ''}`}>
-                        {t.moneda}
-                      </Badge>
-                    </div>
-                    <p className={`text-2xl font-bold ${t.saldo < 0 ? 'text-red-600' : enAlerta ? 'text-amber-600' : 'text-slate-800'}`}>
-                      {formatMonto(t.saldo, t.moneda || 'USD')}
-                    </p>
-                    {t.umbral_alerta != null && (
-                      <div className="mt-2">
-                        <div className="h-1 rounded-full bg-slate-100 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${enAlerta ? 'bg-amber-400' : 'bg-sky-400'}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-1">Umbral: {formatMonto(t.umbral_alerta, t.moneda || 'USD')}</p>
-                      </div>
-                    )}
-                    {enAlerta && (
-                      <div className="flex items-center gap-1 mt-2">
-                        <AlertTriangle className="w-3 h-3 text-amber-500" />
-                        <span className="text-[11px] text-amber-600 font-medium">Saldo por debajo del umbral</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Stock en reserva (tanques) */}
-      {hayStockReserva && (
-        <div>
-          <SectionTitle icon={ArrowLeftRight} title="Stock en reserva (tanques)" iconColor="text-purple-500" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {Object.entries(stockReserva).map(([nombre, litros]) => (
-              <Card key={nombre} className={`border-0 shadow-sm ${litros < 0 ? 'ring-1 ring-red-200 bg-red-50/30' : ''}`}>
-                <CardContent className="p-4">
-                  <p className="text-xs text-slate-500 font-medium truncate">{nombre}</p>
-                  <p className={`text-2xl font-bold mt-1 ${litros < 0 ? 'text-red-600' : 'text-purple-700'}`}>
-                    {litros.toFixed(1)} <span className="text-sm font-normal">L</span>
-                  </p>
-                  {litros < 0 && (
-                    <p className="text-[11px] text-red-500 mt-1 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Stock negativo
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {Object.entries(categoriasReserva).map(([cat, litros]) => (
-              <Card key={cat} className="border-0 shadow-sm">
-                <CardContent className="p-3">
-                  <p className="text-[11px] text-slate-400 uppercase">{cat}</p>
-                  <p className="text-sm font-bold text-slate-700">{Number(litros || 0).toFixed(1)} L</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Consumidores por tipo */}
-      <div>
-        <SectionTitle icon={Users} title="Estado de consumidores" iconColor="text-slate-500" />
-        <ConsumidoresPorTipo
-          consumidores={consumidores}
-          tiposConsumidor={tiposConsumidor}
-          movimientos={movimientos}
-        />
-        <Link to={createPageUrl('Movimientos')} className="text-xs text-sky-600 hover:underline mt-3 inline-block">
-          Ver todos los movimientos →
-        </Link>
-      </div>
     </div>
   );
 }

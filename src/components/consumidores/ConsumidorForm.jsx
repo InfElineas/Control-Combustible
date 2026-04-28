@@ -58,12 +58,12 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
       </Field>
 
       {/* Código interno */}
-      <Field label={isVeh ? "Chapa / Matrícula" : "Código interno"}>
+      <Field label={isVeh ? "Chapa / Matrícula" : "Código interno"} required={isVeh}>
         <Input value={form.codigo_interno || ''} onChange={e => set('codigo_interno', e.target.value)} placeholder={isVeh ? "W004399" : "COD-001"} />
       </Field>
 
       {/* Combustible */}
-      <Field label="Combustible principal">
+      <Field label="Combustible principal" required>
         <Select value={form.combustible_id || ''} onValueChange={v => {
           const c = combustibles.find(x => x.id === v);
           set('combustible_id', v);
@@ -79,8 +79,17 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Responsable">
-          <Input value={form.responsable || ''} onChange={e => set('responsable', e.target.value)} />
+        <Field label="Responsable" required={isVeh}>
+          <Input
+            list="responsable-suggestions"
+            value={form.responsable || ''}
+            onChange={e => set('responsable', e.target.value)}
+            placeholder={isVeh ? 'Nombre o Mixto/Varios' : ''}
+          />
+          <datalist id="responsable-suggestions">
+            <option value="Mixto / Varios" />
+            <option value="Por asignar" />
+          </datalist>
         </Field>
         <Field label="Función">
           <Input value={form.funcion || ''} onChange={e => set('funcion', e.target.value)} placeholder="Transporte, Generación..." />
@@ -116,7 +125,14 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
               <Input value={dv.modelo || ''} onChange={e => setVeh('modelo', e.target.value)} />
             </Field>
             <Field label="Año">
-              <Input type="number" value={dv.anio || ''} onChange={e => setVeh('anio', parseInt(e.target.value) || '')} placeholder="2020" />
+              <Select value={String(dv.anio || '')} onValueChange={v => setVeh('anio', v ? parseInt(v) : '')}>
+                <SelectTrigger><SelectValue placeholder="Año" /></SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: new Date().getFullYear() - 1989 }, (_, i) => new Date().getFullYear() - i).map(y => (
+                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
             <Field label="Capacidad tanque (L)">
               <Input type="number" step="0.1" value={dv.capacidad_tanque || ''} onChange={e => setVeh('capacidad_tanque', parseFloat(e.target.value) || '')} />
@@ -181,6 +197,9 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
             </Field>
             <Field label="Índice referencia">
               <Input type="number" step="0.01" value={de.indice_consumo_referencia || ''} onChange={e => setEquip('indice_consumo_referencia', parseFloat(e.target.value) || '')} />
+            </Field>
+            <Field label="Horas iniciales (horómetro)">
+              <Input type="number" step="0.1" min="0" value={de.horas_iniciales || ''} onChange={e => setEquip('horas_iniciales', parseFloat(e.target.value) || '')} placeholder="0" />
             </Field>
           </div>
           <Field label="Unidad medida consumo">
