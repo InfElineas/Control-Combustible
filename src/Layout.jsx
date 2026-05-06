@@ -6,7 +6,7 @@ import { useTheme } from '@/components/ui-helpers/useTheme';
 import {
   LayoutDashboard, List, Fuel, BarChart3, Menu, ChevronRight,
   LogOut, Settings, ShieldCheck, Users, Bell, BookOpen, Shield,
-  Moon, Sun, WalletCards,
+  Moon, Sun, WalletCards, Navigation,
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -19,6 +19,7 @@ const navItems = [
   { name: 'Consumidores',   page: 'Consumidores',  icon: Users,            roles: ['superadmin', 'operador'] },
   { name: 'Finanzas',       page: 'Finanzas',      icon: WalletCards,      roles: ['superadmin', 'economico'] },
   { name: 'Catálogos',      page: 'Catalogos',     icon: BookOpen,         roles: ['superadmin'] },
+  { name: 'Rutas',          page: 'Rutas',         icon: Navigation,       roles: ['superadmin', 'operador', 'auditor'] },
   { name: 'Alertas',        page: 'Alertas',       icon: Bell,             roles: ['superadmin', 'operador'] },
   { name: 'Reportes',       page: 'Reportes',      icon: BarChart3,        roles: ['superadmin', 'operador', 'auditor', 'economico'] },
   { name: 'Configuración',  page: 'Configuracion', icon: Settings,         roles: ['superadmin', 'operador'] },

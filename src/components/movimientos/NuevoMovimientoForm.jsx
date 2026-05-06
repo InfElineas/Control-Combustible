@@ -7,8 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Save, Loader2, Gauge } from 'lucide-react';
-import { obtenerPrecioVigente, calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
+import { ArrowDownCircle, ArrowLeftRight, Save, Loader2, Gauge } from 'lucide-react';
+import { obtenerPrecioVigente, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { calcularAuditoriaCompra, obtenerCapacidadTanque, AUDITORIA_ESTADO } from './auditoriaCombustible';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
@@ -29,17 +29,15 @@ export default function NuevoMovimientoForm({ onSuccess }) {
   // Tipos de movimiento que el rol actual puede registrar
   const tiposPermitidos = useMemo(() => {
     const all = [
-      { value: 'RECARGA',  label: 'Recarga',  Icon: ArrowUpCircle,   activeClass: 'data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-700' },
       { value: 'COMPRA',   label: 'Compra',   Icon: ArrowDownCircle, activeClass: 'data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700' },
       { value: 'DESPACHO', label: 'Despacho', Icon: ArrowLeftRight,  activeClass: 'data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700' },
     ];
     return all.filter(t => {
-      if (t.value === 'RECARGA')  return canRecargar;
       if (t.value === 'COMPRA')   return canComprar;
       if (t.value === 'DESPACHO') return canDespachar;
       return false;
     });
-  }, [canRecargar, canComprar, canDespachar]);
+  }, [canComprar, canDespachar]);
 
   const [tipo, setTipo] = useState('COMPRA');
 
@@ -138,7 +136,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
   const origenList = consumidoresOrigen.length > 0 ? consumidoresOrigen : consumidoresActivos;
 
   const tarjetaSeleccionada = tarjetas.find(t => t.id === form.tarjeta_id);
-  const saldoTarjeta = tarjetaSeleccionada ? calcularSaldo(tarjetaSeleccionada, movimientos) : null;
 
   const precioVigente = useMemo(() => {
     if (!form.combustible_id || !form.fecha) return null;
@@ -243,8 +240,9 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       fecha: form.fecha,
       litrosAbastecidos: litrosReales,
       capacidadTanque,
+      litrosIniciales: consumidorSeleccionado?.litros_iniciales ?? 0,
     });
-  }, [tipo, movimientos, form.consumidor_id, form.combustible_id, form.fecha, litrosReales, capacidadTanque]);
+  }, [tipo, movimientos, form.consumidor_id, form.combustible_id, form.fecha, litrosReales, capacidadTanque, consumidorSeleccionado]);
 
   // Stock de un consumidor origen (para DESPACHO)
   const calcularStockConsumidor = (consumidorId, combustibleId) => {
@@ -314,11 +312,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       if (auditoriaCompra?.estado === AUDITORIA_ESTADO.EXCESO && capacidadTanque != null) {
         e.litros = `Excede capacidad de tanque (${capacidadTanque.toFixed(2)} L) según estimación.`;
       }
-    } else if (tipo === 'RECARGA') {
-      if (!form.tarjeta_id) e.tarjeta_id = 'Seleccione tarjeta';
-      const montoVal = parseFloat(form.monto);
-      if (!form.monto || isNaN(montoVal) || !isFinite(montoVal) || montoVal <= 0) e.monto = 'Monto debe ser mayor a 0';
-      else if (montoVal > 10000000) e.monto = 'Monto excede el máximo permitido';
     } else if (tipo === 'DESPACHO') {
       if (!form.consumidor_origen_id) e.consumidor_origen_id = 'Seleccione origen (reserva)';
       if (!form.consumidor_id) e.consumidor_id = 'Seleccione consumidor destino';
@@ -375,11 +368,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
         if (consumoRealCalculado != null && requiereOdometro) data.consumo_real = consumoRealCalculado;
       }
       if (form.nivel_tanque) data.nivel_tanque = parseFloat(form.nivel_tanque);
-    } else if (tipo === 'RECARGA') {
-      data.tarjeta_id = tarjeta.id;
-      data.tarjeta_alias = tarjeta.alias || tarjeta.id_tarjeta;
-      data.monto = parseFloat(form.monto);
-      data.referencia = form.referencia;
     } else if (tipo === 'DESPACHO') {
       data.consumidor_origen_id = consumidorOrigen.id;
       data.consumidor_origen_nombre = consumidorOrigen.nombre;
@@ -442,11 +430,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
               </SelectContent>
             </Select>
             {errors.tarjeta_id && <p className="text-xs text-red-500 mt-1">{errors.tarjeta_id}</p>}
-            {saldoTarjeta != null && (
-              <p className={`text-xs mt-1 ${saldoTarjeta <= 0 ? 'text-red-500 font-semibold' : 'text-slate-400'}`}>
-                Saldo actual: {formatMonto(saldoTarjeta, tarjetaSeleccionada?.moneda)}
-              </p>
-            )}
           </div>
         )}
 
@@ -609,21 +592,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
                 )}
               </div>
             ))}
-          </>
-        )}
-
-        {/* RECARGA */}
-        {tipo === 'RECARGA' && (
-          <>
-            <div>
-              <Label className="text-xs text-slate-500">Monto</Label>
-              <Input type="number" step="0.01" min="0.01" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="0.00" className="mt-1" />
-              {errors.monto && <p className="text-xs text-red-500 mt-1">{errors.monto}</p>}
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Referencia (opcional)</Label>
-              <Input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="Factura, nota..." className="mt-1" />
-            </div>
           </>
         )}
 

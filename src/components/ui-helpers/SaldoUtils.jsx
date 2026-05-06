@@ -1,20 +1,3 @@
-function movPerteneceATarjeta(m, tarjeta) {
-  if (m.tarjeta_id) return m.tarjeta_id === tarjeta.id;
-  return m.tarjeta_alias === tarjeta.alias || m.tarjeta_alias === tarjeta.id_tarjeta;
-}
-
-// Calcula el saldo actual de una tarjeta desde el ledger
-export function calcularSaldo(tarjeta, movimientos) {
-  const movsTarjeta = movimientos.filter(m => movPerteneceATarjeta(m, tarjeta));
-  const totalRecargas = movsTarjeta
-    .filter(m => m.tipo === 'RECARGA')
-    .reduce((sum, m) => sum + (m.monto || 0), 0);
-  const totalCompras = movsTarjeta
-    .filter(m => m.tipo === 'COMPRA')
-    .reduce((sum, m) => sum + (m.monto || 0), 0);
-  return (tarjeta.saldo_inicial || 0) + totalRecargas - totalCompras;
-}
-
 // Obtiene el precio vigente para un combustible en una fecha
 export function obtenerPrecioVigente(precios, combustibleId, fecha) {
   const preciosComb = precios

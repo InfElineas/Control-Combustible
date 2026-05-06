@@ -1,12 +1,27 @@
 import { supabase } from './supabaseClient';
+import { logAudit } from './auditLog';
 
-// Mapeo de nombres de campo Base44 → columnas Supabase
 const FIELD_MAP = {
   created_date: 'created_date',
   fecha: 'fecha',
 };
 
-function createEntity(tableName) {
+// Human-readable label extractor per table
+const ENTITY_LABEL = {
+  tarjeta:            d => d?.alias || d?.id_tarjeta,
+  movimiento:         d => [d?.tipo, d?.consumidor_nombre || d?.vehiculo_chapa].filter(Boolean).join(' '),
+  consumidor:         d => d?.nombre,
+  tipo_consumidor:    d => d?.nombre,
+  tipo_combustible:   d => d?.nombre,
+  precio_combustible: d => [d?.combustible_nombre, d?.fecha_vigencia].filter(Boolean).join(' · '),
+  conductor:          d => d?.nombre,
+  vehiculo:           d => d?.nombre || d?.chapa,
+  config_alerta:      d => d?.nombre,
+};
+
+function createEntity(tableName, entityName) {
+  const getLabel = ENTITY_LABEL[tableName] ?? (d => d?.id);
+
   return {
     async list(sort, limit) {
       let query = supabase.from(tableName).select('*');
@@ -29,6 +44,7 @@ function createEntity(tableName) {
         .select()
         .single();
       if (error) throw error;
+      logAudit({ action: 'CREATE', entityType: entityName, entityId: result?.id, entityLabel: getLabel(result), payload: result });
       return result;
     },
 
@@ -40,29 +56,37 @@ function createEntity(tableName) {
         .select()
         .single();
       if (error) throw error;
+      logAudit({ action: 'UPDATE', entityType: entityName, entityId: id, entityLabel: getLabel(result), payload: result, metadata: { changes: data } });
       return result;
     },
 
     async delete(id) {
+      // Snapshot before delete so the audit entry contains what was removed
+      let snapshot = null;
+      try {
+        const { data } = await supabase.from(tableName).select('*').eq('id', id).single();
+        snapshot = data;
+      } catch {}
       const { error } = await supabase.from(tableName).delete().eq('id', id);
       if (error) throw error;
+      logAudit({ action: 'DELETE', entityType: entityName, entityId: id, entityLabel: snapshot ? getLabel(snapshot) : null, payload: snapshot });
     },
   };
 }
 
-// Objeto base44 con la misma forma que el SDK original.
-// Ninguna página necesita cambios: base44.entities.X.list/create/update/delete
 export const base44 = {
   entities: {
-    Tarjeta:           createEntity('tarjeta'),
-    Movimiento:        createEntity('movimiento'),
-    Consumidor:        createEntity('consumidor'),
-    TipoConsumidor:    createEntity('tipo_consumidor'),
-    TipoCombustible:   createEntity('tipo_combustible'),
-    PrecioCombustible: createEntity('precio_combustible'),
-    Conductor:         createEntity('conductor'),
-    Vehiculo:          createEntity('vehiculo'),
-    ConfigAlerta:      createEntity('config_alerta'),
+    Tarjeta:           createEntity('tarjeta',            'Tarjeta'),
+    Movimiento:        createEntity('movimiento',          'Movimiento'),
+    Consumidor:        createEntity('consumidor',          'Consumidor'),
+    TipoConsumidor:    createEntity('tipo_consumidor',     'TipoConsumidor'),
+    TipoCombustible:   createEntity('tipo_combustible',    'TipoCombustible'),
+    PrecioCombustible: createEntity('precio_combustible',  'PrecioCombustible'),
+    Conductor:         createEntity('conductor',           'Conductor'),
+    Vehiculo:          createEntity('vehiculo',            'Vehiculo'),
+    ConfigAlerta:      createEntity('config_alerta',       'ConfigAlerta'),
+    Ruta:              createEntity('ruta',                'Ruta'),
+    AsignacionRuta:    createEntity('asignacion_ruta',     'AsignacionRuta'),
   },
 
   auth: {

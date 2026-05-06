@@ -12,10 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
+import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import {
-  CreditCard, TrendingUp, AlertTriangle, Plus, Pencil, Trash2,
-  RefreshCw, DollarSign, Fuel, ChevronDown, ChevronUp, Loader2,
+  CreditCard, TrendingUp, Plus, Pencil, Trash2,
+  DollarSign, Fuel, ChevronDown, ChevronUp, Loader2,
   WalletCards,
 } from 'lucide-react';
 
@@ -24,53 +24,36 @@ import {
 const MONEDAS = ['USD', 'CUP', 'MLC', 'EUR'];
 
 function emptyTarjeta() {
-  return { id_tarjeta: '', alias: '', moneda: 'USD', saldo_inicial: 0, umbral_alerta: null, activa: true };
+  return { id_tarjeta: '', alias: '', moneda: 'USD', activa: true };
 }
 
 function emptyPrecio() {
   return { combustible_id: '', precio_por_litro: '', fecha_desde: new Date().toISOString().slice(0, 10), fecha_hasta: '' };
 }
 
-function SaldoBadge({ saldo, umbral }) {
-  const alerta = umbral != null && saldo <= umbral;
-  if (alerta) {
-    return (
-      <span className="inline-flex items-center gap-1 text-amber-700 font-semibold text-sm">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-        {formatMonto(saldo)}
-      </span>
-    );
-  }
-  return (
-    <span className={`text-sm font-semibold ${saldo < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-      {formatMonto(saldo)}
-    </span>
-  );
-}
-
 // ── Tab Tarjetas ─────────────────────────────────────────────────────────────
 
 function TarjetasTab({ canManageFinanzas, canDelete }) {
   const qc = useQueryClient();
-  const [dialog, setDialog] = useState(null); // null | { mode: 'create'|'edit'|'recargar', data }
+  const [dialog, setDialog] = useState(null); // null | { mode: 'create'|'edit', data }
   const [form, setForm] = useState(emptyTarjeta());
-  const [recargaForm, setRecargaForm] = useState({ monto: '', fecha: new Date().toISOString().slice(0, 10), referencia: '' });
   const [expandedId, setExpandedId] = useState(null);
 
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: movimientos = [] } = useQuery({ queryKey: ['movimientos'], queryFn: () => base44.entities.Movimiento.list('-fecha', 2000) });
 
-  const tarjetasConSaldo = useMemo(() =>
-    tarjetas.map(t => ({ ...t, saldoActual: calcularSaldo(t, movimientos) }))
-      .sort((a, b) => (a.alias || a.id_tarjeta).localeCompare(b.alias || b.id_tarjeta)),
-    [tarjetas, movimientos]
+  const tarjetasSorted = useMemo(() =>
+    [...tarjetas].sort((a, b) => (a.alias || a.id_tarjeta).localeCompare(b.alias || b.id_tarjeta)),
+    [tarjetas]
   );
 
-  const totales = useMemo(() => ({
-    activas: tarjetasConSaldo.filter(t => t.activa !== false).length,
-    saldo: tarjetasConSaldo.filter(t => t.activa !== false).reduce((s, t) => s + t.saldoActual, 0),
-    alertas: tarjetasConSaldo.filter(t => t.umbral_alerta != null && t.saldoActual <= t.umbral_alerta).length,
-  }), [tarjetasConSaldo]);
+  const mesActual = new Date().toISOString().slice(0, 7);
+  const gastoMes = useMemo(() =>
+    movimientos
+      .filter(m => m.tipo === 'COMPRA' && m.fecha?.startsWith(mesActual) && m.monto)
+      .reduce((s, m) => s + m.monto, 0),
+    [movimientos, mesActual]
+  );
 
   const saveMut = useMutation({
     mutationFn: async (data) => {
@@ -99,40 +82,14 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
     onError: () => toast.error('Error al eliminar'),
   });
 
-  const recargaMut = useMutation({
-    mutationFn: async ({ tarjeta, monto, fecha, referencia }) => {
-      const { error } = await supabase.from('movimiento').insert({
-        fecha,
-        tipo: 'RECARGA',
-        tarjeta_id: tarjeta.id,
-        tarjeta_alias: tarjeta.alias || tarjeta.id_tarjeta,
-        monto: parseFloat(monto),
-        referencia: referencia || null,
-      });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['movimientos'] });
-      qc.invalidateQueries({ queryKey: ['tarjetas'] });
-      toast.success('Recarga registrada');
-      setDialog(null);
-    },
-    onError: () => toast.error('Error al registrar la recarga'),
-  });
-
   function openCreate() {
     setForm(emptyTarjeta());
     setDialog({ mode: 'create' });
   }
 
   function openEdit(t) {
-    setForm({ id_tarjeta: t.id_tarjeta, alias: t.alias || '', moneda: t.moneda || 'USD', saldo_inicial: t.saldo_inicial || 0, umbral_alerta: t.umbral_alerta ?? '', activa: t.activa !== false });
+    setForm({ id_tarjeta: t.id_tarjeta, alias: t.alias || '', moneda: t.moneda || 'USD', activa: t.activa !== false });
     setDialog({ mode: 'edit', data: t });
-  }
-
-  function openRecargar(t) {
-    setRecargaForm({ monto: '', fecha: new Date().toISOString().slice(0, 10), referencia: '' });
-    setDialog({ mode: 'recargar', data: t });
   }
 
   function handleSave() {
@@ -142,33 +99,23 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
       id_tarjeta: form.id_tarjeta.trim(),
       alias: form.alias.trim(),
       moneda: form.moneda,
-      saldo_inicial: parseFloat(form.saldo_inicial) || 0,
-      umbral_alerta: form.umbral_alerta !== '' && form.umbral_alerta != null ? parseFloat(form.umbral_alerta) : null,
       activa: form.activa,
     };
     saveMut.mutate(payload);
   }
 
-  function handleRecargar() {
-    const monto = parseFloat(recargaForm.monto);
-    if (!recargaForm.monto || isNaN(monto) || monto <= 0) { toast.error('El monto debe ser mayor a 0'); return; }
-    if (!recargaForm.fecha) { toast.error('La fecha es requerida'); return; }
-    recargaMut.mutate({ tarjeta: dialog.data, monto, fecha: recargaForm.fecha, referencia: recargaForm.referencia });
-  }
-
   return (
     <div className="space-y-4">
       {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         {[
-          { label: 'Tarjetas activas', value: totales.activas, icon: CreditCard, color: 'text-sky-600 bg-sky-50' },
-          { label: 'Saldo total',      value: formatMonto(totales.saldo), icon: DollarSign, color: 'text-emerald-600 bg-emerald-50' },
-          { label: 'En alerta',        value: totales.alertas, icon: AlertTriangle, color: totales.alertas > 0 ? 'text-amber-600 bg-amber-50' : 'text-slate-400 bg-slate-50' },
+          { label: 'Tarjetas activas', value: tarjetasSorted.filter(t => t.activa !== false).length, icon: CreditCard, color: 'text-sky-600 bg-sky-50' },
+          { label: 'Gasto del mes',    value: formatMonto(gastoMes), icon: DollarSign, color: 'text-emerald-600 bg-emerald-50' },
         ].map(k => (
           <Card key={k.label} className="border-0 shadow-sm">
             <CardContent className="p-3 flex items-center gap-3">
               <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${k.color}`}>
-                <k.icon className="w-4.5 h-4.5 w-4 h-4" />
+                <k.icon className="w-4 h-4" />
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 uppercase tracking-wide leading-tight">{k.label}</p>
@@ -183,7 +130,7 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
       <Card className="border-0 shadow-sm">
         <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold text-slate-700">
-            {tarjetasConSaldo.length} tarjeta{tarjetasConSaldo.length !== 1 ? 's' : ''}
+            {tarjetasSorted.length} tarjeta{tarjetasSorted.length !== 1 ? 's' : ''}
           </CardTitle>
           {canManageFinanzas && (
             <Button size="sm" onClick={openCreate} className="h-7 text-xs gap-1.5 bg-sky-600 hover:bg-sky-700">
@@ -193,7 +140,7 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-slate-100">
-            {tarjetasConSaldo.map(t => {
+            {tarjetasSorted.map(t => {
               const isExpanded = expandedId === t.id;
               const movsTarjeta = movimientos
                 .filter(m => m.tarjeta_id === t.id || (!m.tarjeta_id && m.tarjeta_alias && (m.tarjeta_alias === t.alias || m.tarjeta_alias === t.id_tarjeta)))
@@ -212,23 +159,8 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
                         <Badge variant="outline" className="text-[10px] py-0 px-1.5">{t.moneda}</Badge>
                         {t.activa === false && <Badge variant="outline" className="text-[10px] py-0 px-1.5 text-slate-400">Inactiva</Badge>}
                       </div>
-                      <div className="flex items-center gap-3 mt-0.5">
-                        <SaldoBadge saldo={t.saldoActual} umbral={t.umbral_alerta} />
-                        {t.umbral_alerta != null && (
-                          <span className="text-[10px] text-slate-400">Umbral: {formatMonto(t.umbral_alerta)}</span>
-                        )}
-                      </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {canManageFinanzas && (
-                        <Button
-                          size="sm" variant="outline"
-                          className="h-7 text-xs gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 px-2.5"
-                          onClick={() => openRecargar(t)}
-                        >
-                          <RefreshCw className="w-3 h-3" /> Recargar
-                        </Button>
-                      )}
                       {canManageFinanzas && (
                         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(t)}>
                           <Pencil className="w-3 h-3 text-slate-400" />
@@ -260,7 +192,6 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
                             <div key={m.id} className="flex items-center gap-2 text-xs">
                               <span className="text-slate-400 tabular-nums w-20 shrink-0">{m.fecha}</span>
                               <Badge variant="outline" className={`text-[10px] py-0 px-1.5 shrink-0 ${
-                                m.tipo === 'RECARGA' ? 'border-emerald-200 text-emerald-700' :
                                 m.tipo === 'COMPRA'  ? 'border-orange-200 text-orange-700' :
                                 'border-purple-200 text-purple-700'
                               }`}>{m.tipo}</Badge>
@@ -268,8 +199,8 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
                                 {m.consumidor_nombre || m.referencia || '—'}
                                 {m.litros ? <span className="text-slate-400 ml-1">{m.litros}L</span> : null}
                               </span>
-                              <span className={`font-medium tabular-nums shrink-0 ${m.tipo === 'RECARGA' ? 'text-emerald-600' : 'text-orange-600'}`}>
-                                {m.tipo === 'RECARGA' ? '+' : '-'}{formatMonto(m.monto)}
+                              <span className="font-medium tabular-nums shrink-0 text-orange-600">
+                                -{formatMonto(m.monto)}
                               </span>
                             </div>
                           ))}
@@ -280,7 +211,7 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
                 </div>
               );
             })}
-            {tarjetasConSaldo.length === 0 && (
+            {tarjetasSorted.length === 0 && (
               <div className="py-12 text-center text-sm text-slate-400">No hay tarjetas registradas</div>
             )}
           </div>
@@ -300,24 +231,14 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
             </div>
             <div>
               <Label className="text-xs text-slate-500">Número / Código *</Label>
-              <Input className="mt-1" value={form.id_tarjeta} onChange={e => setForm(f => ({ ...f, id_tarjeta: e.target.value }))} placeholder="9240069992278321" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-slate-500">Moneda</Label>
-                <Select value={form.moneda} onValueChange={v => setForm(f => ({ ...f, moneda: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>{MONEDAS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-slate-500">Saldo inicial</Label>
-                <Input type="number" step="0.01" min="0" className="mt-1" value={form.saldo_inicial} onChange={e => setForm(f => ({ ...f, saldo_inicial: e.target.value }))} />
-              </div>
+              <Input className="mt-1" value={form.id_tarjeta} onChange={e => setForm(f => ({ ...f, id_tarjeta: e.target.value }))} disabled={dialog?.mode === 'edit'} placeholder="9240069992278321" />
             </div>
             <div>
-              <Label className="text-xs text-slate-500">Umbral de alerta ($)</Label>
-              <Input type="number" step="0.01" min="0" className="mt-1" value={form.umbral_alerta ?? ''} onChange={e => setForm(f => ({ ...f, umbral_alerta: e.target.value }))} placeholder="Ej: 100 — deja vacío para desactivar" />
+              <Label className="text-xs text-slate-500">Moneda</Label>
+              <Select value={form.moneda} onValueChange={v => setForm(f => ({ ...f, moneda: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>{MONEDAS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
             <div className="flex items-center gap-3">
               <Switch checked={form.activa} onCheckedChange={v => setForm(f => ({ ...f, activa: v }))} />
@@ -329,43 +250,6 @@ function TarjetasTab({ canManageFinanzas, canDelete }) {
             <Button size="sm" onClick={handleSave} disabled={saveMut.isPending} className="bg-sky-600 hover:bg-sky-700">
               {saveMut.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
               {dialog?.mode === 'edit' ? 'Guardar cambios' : 'Crear tarjeta'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog recargar */}
-      <Dialog open={dialog?.mode === 'recargar'} onOpenChange={open => !open && setDialog(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-sm flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 text-emerald-600" />
-              Recargar — {dialog?.data?.alias || dialog?.data?.id_tarjeta}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-1">
-            <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-              <span className="text-xs text-slate-500">Saldo actual</span>
-              <SaldoBadge saldo={dialog?.data?.saldoActual ?? 0} umbral={dialog?.data?.umbral_alerta} />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Monto a recargar *</Label>
-              <Input type="number" step="0.01" min="0.01" className="mt-1" value={recargaForm.monto} onChange={e => setRecargaForm(f => ({ ...f, monto: e.target.value }))} placeholder="0.00" autoFocus />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Fecha</Label>
-              <Input type="date" className="mt-1" value={recargaForm.fecha} onChange={e => setRecargaForm(f => ({ ...f, fecha: e.target.value }))} />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Referencia (opcional)</Label>
-              <Input className="mt-1" value={recargaForm.referencia} onChange={e => setRecargaForm(f => ({ ...f, referencia: e.target.value }))} placeholder="Nro. de comprobante, transferencia..." />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setDialog(null)}>Cancelar</Button>
-            <Button size="sm" onClick={handleRecargar} disabled={recargaMut.isPending} className="bg-emerald-600 hover:bg-emerald-700">
-              {recargaMut.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Registrar recarga
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -576,7 +460,7 @@ function PreciosTab({ canManageFinanzas }) {
 // ── Página principal ─────────────────────────────────────────────────────────
 
 export default function Finanzas() {
-  const { isSuperAdmin, isEconomico, canManageFinanzas, canDelete } = useUserRole();
+  const { canManageFinanzas, canDelete } = useUserRole();
   const [tab, setTab] = useState('tarjetas');
 
   if (!canManageFinanzas) {
@@ -596,13 +480,13 @@ export default function Finanzas() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-slate-800">Finanzas</h1>
-          <p className="text-xs text-slate-400">Gestión de tarjetas, saldos y precios de combustible</p>
+          <p className="text-xs text-slate-400">Gestión de tarjetas y precios de combustible</p>
         </div>
       </div>
 
       <div className="flex gap-0.5 border-b border-slate-200 dark:border-slate-700">
         {[
-          { value: 'tarjetas', label: 'Tarjetas y saldos', icon: <CreditCard className="w-3.5 h-3.5" /> },
+          { value: 'tarjetas', label: 'Tarjetas', icon: <CreditCard className="w-3.5 h-3.5" /> },
           { value: 'precios',  label: 'Precios de combustible', icon: <TrendingUp className="w-3.5 h-3.5" /> },
         ].map(({ value: v, label, icon }) => (
           <button

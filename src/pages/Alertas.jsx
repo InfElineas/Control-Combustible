@@ -38,7 +38,7 @@ function AlertaRow({ consumidor, movimientos, config, onConfigEdit }) {
   };
 
   const movsConConsumo = movimientos
-    .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id && m.consumo_real != null)
+    .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === consumidor.id && m.consumo_real != null)
     .sort((a, b) => b.odometro - a.odometro);
 
   const ultimoConsumo = movsConConsumo[0]?.consumo_real ?? null;
@@ -254,7 +254,7 @@ export default function Alertas() {
     return consumidoresActivos.map(c => {
       const config = configAlertas.find(ca => ca.consumidor_id === c.id) ?? null;
       const movsConConsumo = movimientos.filter(m =>
-        m.tipo === 'COMPRA' && m.consumidor_id === c.id && m.consumo_real != null
+        (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.consumo_real != null
       ).sort((a, b) => b.odometro - a.odometro);
 
       const ultimoConsumo = movsConConsumo[0]?.consumo_real ?? null;

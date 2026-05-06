@@ -48,9 +48,6 @@ export default function Configuracion() {
   const normalizeTarjetaRow = (row) => {
     const idTarjeta = String(row?.id_tarjeta || row?.Tarjeta || '').trim();
     const moneda = String(row?.moneda || 'USD').trim() || 'USD';
-    const saldoInicial = Number(row?.saldo_inicial ?? 0);
-    const umbralRaw = row?.umbral_alerta;
-    const umbralAlerta = umbralRaw === '' || umbralRaw == null ? null : Number(umbralRaw);
     const activa = row?.activa == null ? true : Boolean(row.activa);
     const alias = row?.alias == null ? null : String(row.alias).trim() || null;
 
@@ -58,25 +55,14 @@ export default function Configuracion() {
     const warnings = [];
 
     if (!idTarjeta) errors.push('id_tarjeta es requerido');
-    if (!Number.isFinite(saldoInicial)) errors.push('saldo_inicial debe ser numérico');
-    if (umbralRaw != null && umbralRaw !== '' && !Number.isFinite(umbralAlerta)) {
-      errors.push('umbral_alerta debe ser numérico o null');
-    }
 
-    const ignoredFields = ['id', 'created_date', 'updated_date', 'created_by_id', 'created_by', 'is_sample'];
+    const ignoredFields = ['id', 'created_date', 'updated_date', 'created_by_id', 'created_by', 'is_sample', 'saldo_inicial', 'umbral_alerta'];
     const presentIgnored = ignoredFields.filter((k) => row?.[k] != null);
     if (presentIgnored.length > 0) {
       warnings.push(`Se ignorarán campos externos: ${presentIgnored.join(', ')}`);
     }
 
-    const tarjeta = errors.length > 0 ? null : {
-      id_tarjeta: idTarjeta,
-      alias,
-      moneda,
-      saldo_inicial: saldoInicial,
-      umbral_alerta: umbralAlerta,
-      activa,
-    };
+    const tarjeta = errors.length > 0 ? null : { id_tarjeta: idTarjeta, alias, moneda, activa };
 
     return { row, tarjeta, warnings, errors };
   };
@@ -509,7 +495,7 @@ export default function Configuracion() {
                 value={tarjetasJson}
                 onChange={(e) => setTarjetasJson(e.target.value)}
                 className="w-full min-h-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 text-slate-800 dark:text-slate-200 px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-sky-200 dark:focus:ring-sky-700"
-                placeholder='[{"id_tarjeta":"9240069992278321","alias":"Tarjeta #78321","moneda":"USD","saldo_inicial":0,"umbral_alerta":null,"activa":true}]'
+                placeholder='[{"id_tarjeta":"9240069992278321","alias":"Tarjeta #78321","moneda":"USD","activa":true}]'
               />
               <div className="flex flex-wrap gap-2">
                 <Button variant="outline" onClick={handlePreviewTarjetas} disabled={!tarjetasJson.trim()}>

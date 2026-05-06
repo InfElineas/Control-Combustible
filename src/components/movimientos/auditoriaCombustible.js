@@ -37,6 +37,7 @@ export const calcularAuditoriaCompra = ({
   fecha,
   litrosAbastecidos,
   capacidadTanque,
+  litrosIniciales = 0,
   excludeMovimientoId,
 }) => {
   const litros = toNumber(litrosAbastecidos);
@@ -50,15 +51,24 @@ export const calcularAuditoriaCompra = ({
     return m.combustible_id === combustibleId;
   });
 
+  // Fuel entering this consumidor: gas-station purchases + DESPACHO received (as destination)
   const comprasPrevias = historico
     .filter((m) => m.tipo === 'COMPRA' && m.consumidor_id === consumidorId)
     .reduce((sum, m) => sum + (toNumber(m.litros) || 0), 0);
 
-  const despachosPrevios = historico
+  const despachosRecibidos = historico
     .filter((m) => m.tipo === 'DESPACHO' && m.consumidor_id === consumidorId)
     .reduce((sum, m) => sum + (toNumber(m.litros) || 0), 0);
 
-  if (comprasPrevias <= 0 && despachosPrevios <= 0) {
+  // Fuel leaving this consumidor: DESPACHO dispatched (as origin/source)
+  const despachosDespachados = historico
+    .filter((m) => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidorId)
+    .reduce((sum, m) => sum + (toNumber(m.litros) || 0), 0);
+
+  const totalEntradas = comprasPrevias + despachosRecibidos;
+  const initialStock = toNumber(litrosIniciales) || 0;
+
+  if (totalEntradas <= 0 && initialStock <= 0) {
     const estimadoPostInicial = litros;
     if (!capacidadTanque) {
       return {
@@ -74,7 +84,7 @@ export const calcularAuditoriaCompra = ({
     };
   }
 
-  const remanenteAntes = Math.max(comprasPrevias - despachosPrevios, 0);
+  const remanenteAntes = Math.max(initialStock + totalEntradas - despachosDespachados, 0);
   const combustibleEstimadoPost = remanenteAntes + litros;
 
   if (!capacidadTanque) {

@@ -21,7 +21,7 @@ export default function LogConsumidorModal({ movimiento, todosMovimientos, onClo
       .sort((a, b) => b.fecha?.localeCompare(a.fecha));
   }, [consumidorId, todosMovimientos]);
 
-  const totalLitros = logs.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.litros || 0), 0);
+  const totalLitros = logs.filter(m => m.consumidor_id === consumidorId && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO')).reduce((s, m) => s + (m.litros || 0), 0);
   const totalGasto = logs.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.monto || 0), 0);
 
   return (

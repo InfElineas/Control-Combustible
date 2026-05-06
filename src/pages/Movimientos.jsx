@@ -11,7 +11,7 @@ import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import CombustibleBadge from '@/components/ui-helpers/CombustibleBadge';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
-import CSVExport from '@/components/ui-helpers/CSVExport';
+import ExportButton from '@/components/ui-helpers/ExportButton';
 import NuevoMovimientoForm from '@/components/movimientos/NuevoMovimientoForm';
 import MovimientoDetalle from '@/components/movimientos/MovimientoDetalle';
 import MovimientoAcciones from '@/components/movimientos/MovimientoAcciones';
@@ -42,11 +42,12 @@ export default function Movimientos() {
   const { data: combustibles = [] } = useQuery({ queryKey: ['combustibles'], queryFn: () => base44.entities.TipoCombustible.list() });
   const { data: tiposConsumidor = [] } = useQuery({ queryKey: ['tiposConsumidor'], queryFn: () => base44.entities.TipoConsumidor.list() });
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState(FILTROS_INICIAL);
   const [showFilters, setShowFilters] = useState(false);
   const [tabCombustible, setTabCombustible] = useState('all');
   const [page, setPage] = useState(1);
+  const [pinMovId, setPinMovId] = useState(null);
 
   useEffect(() => {
     const nombreCombustible = searchParams.get('combustible');
@@ -55,7 +56,22 @@ export default function Movimientos() {
     if (match) setTabCombustible(match.id);
   }, [searchParams, combustibles]);
 
-  useEffect(() => { setPage(1); }, [filters, tabCombustible]);
+  useEffect(() => {
+    const movId = searchParams.get('movimientoId');
+    if (!movId || movimientos.length === 0) return;
+    const mov = movimientos.find(m => m.id === movId);
+    if (mov) {
+      setPinMovId(movId);
+      setDetalleMovimiento(mov);
+    }
+  }, [searchParams, movimientos]);
+
+  const clearPin = () => {
+    setPinMovId(null);
+    setSearchParams(prev => { prev.delete('movimientoId'); return prev; });
+  };
+
+  useEffect(() => { setPage(1); }, [filters, tabCombustible, pinMovId]);
 
   const [collapsedDates, setCollapsedDates] = useState(new Set());
   const toggleDate = (fecha) => setCollapsedDates(prev => {
@@ -81,6 +97,7 @@ export default function Movimientos() {
   });
 
   const filtered = useMemo(() => {
+    if (pinMovId) return movimientos.filter(m => m.id === pinMovId);
     const consumidorById = Object.fromEntries(consumidores.map(c => [c.id, c]));
     return movimientos.filter(m => {
       if (isEconomico && m.tipo === 'DESPACHO') return false;
@@ -97,7 +114,7 @@ export default function Movimientos() {
       }
       return true;
     });
-  }, [movimientos, filters, consumidores]);
+  }, [movimientos, filters, consumidores, pinMovId]);
 
   // Count per combustible for tab badges
   const tabCounts = useMemo(() => {
@@ -158,7 +175,7 @@ export default function Movimientos() {
           <p className="text-xs text-slate-400">{filteredByTab.length} registros</p>
         </div>
         <div className="flex gap-1.5 shrink-0">
-          <CSVExport data={filteredByTab} columns={csvColumns} filename="movimientos" />
+          <ExportButton data={filteredByTab} columns={csvColumns} filename="movimientos" title="Movimientos" />
           <Button
             variant="outline" size="sm"
             onClick={() => setShowFilters(!showFilters)}
@@ -177,8 +194,21 @@ export default function Movimientos() {
         </div>
       </div>
 
+      {/* Pin banner */}
+      {pinMovId && (
+        <div className="flex items-center gap-2 bg-sky-50 border border-sky-200 rounded-xl px-4 py-2 text-sm text-sky-700">
+          <span className="font-medium">Mostrando movimiento específico</span>
+          <button
+            onClick={clearPin}
+            className="ml-auto text-xs text-sky-500 hover:text-sky-700 font-semibold underline underline-offset-2"
+          >
+            × Limpiar
+          </button>
+        </div>
+      )}
+
       {/* Tabs por combustible */}
-      {activeTabs.length > 1 && (
+      {!pinMovId && activeTabs.length > 1 && (
         <div className="flex gap-0.5 flex-wrap border-b border-slate-200 dark:border-slate-700">
           <button
             onClick={() => setTabCombustible('all')}

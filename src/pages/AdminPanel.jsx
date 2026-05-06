@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { base44 } from '@/api/base44Client';
 import { supabase } from '@/api/supabaseClient';
+import { logAudit } from '@/api/auditLog';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Users, Shield, Activity, ShieldCheck, ShieldAlert,
-  Pencil, Check, X, Search, ChevronLeft, ChevronRight
+  Pencil, Check, X, Search, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react';
 
 // ── Constantes ───────────────────────────────────────────────────────────────
@@ -39,13 +40,39 @@ const PERMISOS_TABLA = [
   { permiso: 'Panel de administración del sitio', desc: 'Este panel',                         superadmin: true,  operador: false, auditor: false, economico: false },
 ];
 
-const TIPO_BADGE = {
-  COMPRA:   'border-orange-200 text-orange-700 bg-orange-50',
-  DESPACHO: 'border-purple-200 text-purple-700 bg-purple-50',
-  RECARGA:  'border-emerald-200 text-emerald-700 bg-emerald-50',
+const AUD_PAGE = 50;
+
+const ACTION_CFG = {
+  CREATE:      { label: 'Creó',       cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  UPDATE:      { label: 'Editó',      cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  DELETE:      { label: 'Eliminó',    cls: 'bg-red-50 text-red-700 border-red-200' },
+  ROLE_CHANGE: { label: 'Cambió rol', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
 };
 
-const AUD_PAGE = 50;
+const ENTITY_ES = {
+  Movimiento:        'Movimiento',
+  Tarjeta:           'Tarjeta',
+  Consumidor:        'Consumidor',
+  TipoConsumidor:    'Tipo consumidor',
+  TipoCombustible:   'Combustible',
+  PrecioCombustible: 'Precio combustible',
+  Conductor:         'Conductor',
+  Vehiculo:          'Vehículo',
+  ConfigAlerta:      'Alerta',
+  UserRole:          'Rol usuario',
+};
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const diffMin = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (diffMin < 1)  return 'Ahora';
+  if (diffMin < 60) return `Hace ${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24)   return `Hace ${diffH}h`;
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) + ' ' +
+         d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
 
 // ── Componente principal ─────────────────────────────────────────────────────
 
@@ -87,7 +114,7 @@ export default function AdminPanel() {
         {[
           { value: 'usuarios',  label: 'Usuarios',                icon: <Users      className="w-3.5 h-3.5" /> },
           { value: 'permisos',  label: 'Roles y Permisos',        icon: <ShieldCheck className="w-3.5 h-3.5" /> },
-          { value: 'auditoria', label: 'Auditoría de Movimientos', icon: <Activity   className="w-3.5 h-3.5" /> },
+          { value: 'auditoria', label: 'Auditoría', icon: <Activity className="w-3.5 h-3.5" /> },
         ].map(({ value: v, label, icon }) => (
           <button
             key={v}
@@ -138,10 +165,12 @@ function UsuariosTab() {
       const { error } = await supabase.from('user_roles').update({ role }).eq('user_id', userId);
       if (error) throw error;
     },
-    onSuccess: (_, { userId }) => {
+    onSuccess: (_, { userId, role }) => {
       queryClient.invalidateQueries({ queryKey: ['admin_user_roles'] });
       setEditing(p => { const n = { ...p }; delete n[userId]; return n; });
       toast.success('Rol actualizado correctamente');
+      const u = users.find(x => x.user_id === userId);
+      logAudit({ action: 'ROLE_CHANGE', entityType: 'UserRole', entityId: userId, entityLabel: u?.email || userId, metadata: { newRole: role, prevRole: u?.role } });
     },
     onError: () => toast.error('Error al actualizar el rol'),
   });
@@ -331,62 +360,129 @@ function PermisosTab() {
 
 function AuditoriaTab() {
   const [page, setPage] = useState(1);
-  const [filtroTipo, setFiltroTipo] = useState('all');
+  const [filtroAction, setFiltroAction] = useState('all');
+  const [filtroEntity, setFiltroEntity] = useState('all');
+  const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
 
-  const { data: movimientos = [], isLoading } = useQuery({
-    queryKey: ['movimientos_admin_audit'],
-    queryFn: () => base44.entities.Movimiento.list('-fecha', 1000),
-    staleTime: 60_000,
+  const { data: logs = [], isLoading, error } = useQuery({
+    queryKey: ['audit_log'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('audit_log')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1000);
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 
-  const filtered = filtroTipo === 'all'
-    ? movimientos
-    : movimientos.filter(m => m.tipo === filtroTipo);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayLogs = logs.filter(l => l.created_at?.startsWith(today));
+  const kpi = { all: todayLogs.length, CREATE: 0, UPDATE: 0, DELETE: 0 };
+  todayLogs.forEach(l => { if (l.action in kpi) kpi[l.action]++; });
+
+  const entityTypes = [...new Set(logs.map(l => l.entity_type).filter(Boolean))].sort();
+
+  const filtered = logs.filter(l => {
+    if (filtroAction !== 'all' && l.action !== filtroAction) return false;
+    if (filtroEntity !== 'all' && l.entity_type !== filtroEntity) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const hay = `${l.user_name || ''} ${l.user_email || ''} ${l.entity_label || ''} ${l.entity_type || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / AUD_PAGE));
-  const paginated  = filtered.slice((page - 1) * AUD_PAGE, page * AUD_PAGE);
+  const safePage   = Math.min(page, totalPages);
+  const paginated  = filtered.slice((safePage - 1) * AUD_PAGE, safePage * AUD_PAGE);
 
-  const totales = {
-    compras:   movimientos.filter(m => m.tipo === 'COMPRA').length,
-    despachos: movimientos.filter(m => m.tipo === 'DESPACHO').length,
-    recargas:  movimientos.filter(m => m.tipo === 'RECARGA').length,
-  };
+  if (error) {
+    return (
+      <div className="py-10 text-center space-y-2">
+        <p className="text-sm text-red-600 font-medium">Error cargando el log de auditoría.</p>
+        <p className="text-xs text-slate-400">
+          Verifique que la tabla <code className="bg-slate-100 px-1 rounded">audit_log</code> exista en Supabase y que las políticas RLS estén configuradas.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      {/* KPIs rápidos */}
-      <div className="grid grid-cols-3 gap-2">
+    <div className="space-y-4">
+      {/* KPIs: actividad de hoy */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {[
-          { label: 'Compras',   count: totales.compras,   tipo: 'COMPRA',   cls: 'text-orange-600 bg-orange-50 border-orange-100' },
-          { label: 'Despachos', count: totales.despachos, tipo: 'DESPACHO', cls: 'text-purple-600 bg-purple-50 border-purple-100' },
-          { label: 'Recargas',  count: totales.recargas,  tipo: 'RECARGA',  cls: 'text-emerald-600 bg-emerald-50 border-emerald-100' },
+          { label: 'Eventos hoy',   value: kpi.all,    cls: 'bg-slate-50 border-slate-200 text-slate-700' },
+          { label: 'Creaciones',    value: kpi.CREATE,  cls: 'bg-emerald-50 border-emerald-100 text-emerald-700' },
+          { label: 'Ediciones',     value: kpi.UPDATE,  cls: 'bg-amber-50 border-amber-100 text-amber-700' },
+          { label: 'Eliminaciones', value: kpi.DELETE,  cls: 'bg-red-50 border-red-100 text-red-700' },
         ].map(k => (
-          <button
-            key={k.tipo}
-            onClick={() => { setFiltroTipo(filtroTipo === k.tipo ? 'all' : k.tipo); setPage(1); }}
-            className={`rounded-xl border p-3 text-left transition-all ${filtroTipo === k.tipo ? k.cls + ' ring-2 ring-offset-1' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
-          >
-            <p className="text-[10px] text-slate-500 uppercase tracking-wide">{k.label}</p>
-            <p className={`text-lg font-bold mt-0.5 ${filtroTipo === k.tipo ? '' : 'text-slate-800'}`}>{k.count}</p>
-          </button>
+          <div key={k.label} className={`rounded-xl border p-3 ${k.cls}`}>
+            <p className="text-[10px] uppercase tracking-wide opacity-60">{k.label}</p>
+            <p className="text-lg font-bold mt-0.5">{k.value}</p>
+          </div>
         ))}
       </div>
 
-      {/* Tabla */}
+      {/* Filtros */}
+      <div className="flex gap-2 flex-wrap items-center">
+        <div className="relative flex-1 min-w-40">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          <Input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Buscar usuario o entidad..."
+            className="pl-8 h-8 text-xs"
+          />
+        </div>
+        <Select value={filtroAction} onValueChange={v => { setFiltroAction(v); setPage(1); }}>
+          <SelectTrigger className="h-8 text-xs w-36">
+            <SelectValue placeholder="Acción" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las acciones</SelectItem>
+            {Object.entries(ACTION_CFG).map(([k, v]) => (
+              <SelectItem key={k} value={k}>{v.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filtroEntity} onValueChange={v => { setFiltroEntity(v); setPage(1); }}>
+          <SelectTrigger className="h-8 text-xs w-40">
+            <SelectValue placeholder="Entidad" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las entidades</SelectItem>
+            {entityTypes.map(et => (
+              <SelectItem key={et} value={et}>{ENTITY_ES[et] ?? et}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Lista */}
       <Card className="border-0 shadow-sm overflow-hidden">
         <CardHeader className="pb-2 px-4 pt-3 flex flex-row items-center gap-2">
           <CardTitle className="text-sm font-semibold text-slate-600 flex-1">
-            {filtered.length} movimientos{filtroTipo !== 'all' ? ` · ${filtroTipo}` : ''}
+            {filtered.length} evento{filtered.length !== 1 ? 's' : ''}
+            {(filtroAction !== 'all' || filtroEntity !== 'all' || search) && (
+              <span className="ml-1 text-slate-400 font-normal">· filtrado</span>
+            )}
           </CardTitle>
           {totalPages > 1 && (
             <div className="flex items-center gap-1 shrink-0">
               <Button variant="outline" size="icon" className="h-7 w-7"
-                onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}>
                 <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
-              <span className="text-xs text-slate-500 tabular-nums px-1">{page}/{totalPages}</span>
+              <span className="text-xs text-slate-500 tabular-nums px-1">{safePage}/{totalPages}</span>
               <Button variant="outline" size="icon" className="h-7 w-7"
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}>
                 <ChevronRight className="w-3.5 h-3.5" />
               </Button>
             </div>
@@ -394,49 +490,91 @@ function AuditoriaTab() {
         </CardHeader>
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="p-8 text-center text-sm text-slate-400">Cargando movimientos...</div>
+            <div className="p-8 text-center text-sm text-slate-400">Cargando auditoría...</div>
+          ) : filtered.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-400">Sin eventos registrados aún</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100 bg-slate-50 text-[11px] text-slate-400 uppercase tracking-wide">
-                    <th className="text-left px-4 py-2.5">Fecha</th>
-                    <th className="text-left px-4 py-2.5">Tipo</th>
-                    <th className="text-left px-4 py-2.5">Consumidor</th>
-                    <th className="text-left px-4 py-2.5 hidden sm:table-cell">Combustible</th>
-                    <th className="text-right px-4 py-2.5">Litros</th>
-                    <th className="text-right px-4 py-2.5 hidden md:table-cell">Monto</th>
-                    <th className="text-left px-4 py-2.5 hidden lg:table-cell">Referencia</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {paginated.map(m => (
-                    <tr key={m.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-4 py-2.5 text-slate-600 tabular-nums font-medium">{m.fecha}</td>
-                      <td className="px-4 py-2.5">
-                        <Badge variant="outline" className={`text-[10px] ${TIPO_BADGE[m.tipo] ?? ''}`}>
-                          {m.tipo}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-700 max-w-[140px] truncate">
-                        {m.consumidor_nombre || m.vehiculo_chapa || '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-500 hidden sm:table-cell">
-                        {m.combustible_nombre || '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-slate-800 font-semibold tabular-nums">
-                        {m.litros != null ? `${Number(m.litros).toFixed(1)} L` : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-slate-500 tabular-nums hidden md:table-cell">
-                        {m.monto != null ? `$${Number(m.monto).toFixed(2)}` : '—'}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-400 hidden lg:table-cell max-w-[120px] truncate">
-                        {m.referencia || '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="divide-y divide-slate-100">
+              {paginated.map(log => {
+                const cfg       = ACTION_CFG[log.action] ?? { label: log.action, cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+                const isExp     = expandedId === log.id;
+                const initial   = (log.user_name || log.user_email || '?')[0].toUpperCase();
+                const hasDetail = log.payload || log.metadata;
+                return (
+                  <div key={log.id} className="hover:bg-slate-50/60 transition-colors">
+                    <div className="flex items-center gap-3 px-4 py-3">
+                      {/* Avatar */}
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center text-[11px] font-bold text-slate-600 shrink-0">
+                        {initial}
+                      </div>
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-slate-700">
+                            {log.user_name || log.user_email || 'Sistema'}
+                          </span>
+                          <Badge variant="outline" className={`text-[10px] shrink-0 ${cfg.cls}`}>
+                            {cfg.label}
+                          </Badge>
+                          <span className="text-[11px] text-slate-400 shrink-0">
+                            {ENTITY_ES[log.entity_type] ?? log.entity_type}
+                          </span>
+                          {log.entity_label && (
+                            <span className="text-xs text-slate-600 font-medium truncate">
+                              · {log.entity_label}
+                            </span>
+                          )}
+                        </div>
+                        {log.user_name && log.user_email && (
+                          <p className="text-[10px] text-slate-400 mt-0.5">{log.user_email}</p>
+                        )}
+                      </div>
+                      {/* Time + expand */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[10px] text-slate-400 tabular-nums" title={log.created_at}>
+                          {fmtTime(log.created_at)}
+                        </span>
+                        {hasDetail && (
+                          <button
+                            onClick={() => setExpandedId(isExp ? null : log.id)}
+                            className="text-slate-300 hover:text-slate-500 transition-colors"
+                            title="Ver detalle"
+                          >
+                            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExp ? 'rotate-180' : ''}`} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {/* Expanded detail */}
+                    {isExp && (
+                      <div className="px-4 pb-3 ml-10">
+                        <div className="bg-slate-50 rounded-lg p-3 text-[10px] font-mono text-slate-600 overflow-x-auto max-h-52 overflow-y-auto space-y-2">
+                          {log.metadata?.changes && (
+                            <div>
+                              <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-1 font-sans font-semibold">Campos modificados</p>
+                              <pre className="whitespace-pre-wrap">{JSON.stringify(log.metadata.changes, null, 2)}</pre>
+                            </div>
+                          )}
+                          {log.metadata?.newRole && (
+                            <div>
+                              <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-1 font-sans font-semibold">Cambio de rol</p>
+                              <p>{log.metadata.prevRole} → {log.metadata.newRole}</p>
+                            </div>
+                          )}
+                          {log.payload && (
+                            <div>
+                              <p className="text-[9px] uppercase tracking-wide text-slate-400 mb-1 font-sans font-semibold">
+                                {log.action === 'DELETE' ? 'Registro eliminado' : 'Estado guardado'}
+                              </p>
+                              <pre className="whitespace-pre-wrap">{JSON.stringify(log.payload, null, 2)}</pre>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

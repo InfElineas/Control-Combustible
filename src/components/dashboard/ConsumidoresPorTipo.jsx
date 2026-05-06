@@ -75,8 +75,9 @@ function esEquipo(consumidor) {
   return n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
 }
 
-function ConsumidorCard({ consumidor, movimientos, hoy }) {
+function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
   const mesActual = hoy.toISOString().slice(0, 7);
+  const periodo = mesFiltro === 'ALL' ? mesActual : mesFiltro;
   const esTanqueConsumidor = esTanque(consumidor);
   const esEquipoConsumidor = esEquipo(consumidor);
   const [detallesOpen, setDetallesOpen] = useState(false);
@@ -107,8 +108,9 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
     ? Math.floor((hoy - new Date(ultimaCarga.fecha + 'T00:00:00')) / 864e5)
     : null;
 
-  // ── Mes de referencia: actual si tiene actividad, sino el último con actividad
+  // ── Mes de referencia: usa el filtro activo o, si es ALL, el último mes con actividad
   const mesReferencia = React.useMemo(() => {
+    if (mesFiltro !== 'ALL') return mesFiltro;
     const hayEsteMes = [...compras, ...despachosRecibidos]
       .some(m => m.fecha?.startsWith(mesActual));
     if (hayEsteMes) return mesActual;
@@ -116,9 +118,9 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
       .filter(m => m.fecha)
       .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))[0];
     return masReciente?.fecha?.slice(0, 7) ?? mesActual;
-  }, [compras, despachosRecibidos, mesActual]);
+  }, [mesFiltro, compras, despachosRecibidos, mesActual]);
 
-  const esMesActual = mesReferencia === mesActual;
+  const esMesActual = mesFiltro === 'ALL' && mesReferencia === mesActual;
 
   // ── Cargas del mes de referencia ─────────────────────────────────────────
   const comprasMes = React.useMemo(() =>
@@ -144,6 +146,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   const ultimoConsumoReal = comprasConOdo[0]?.consumo_real ?? null;
 
   // ── Odómetro: últimas dos lecturas registradas (sin filtro de mes) ─────────
+  // Se usan para mostrar odo inicio/fin/km en la UI, no para calcular consumo.
   // comprasConOdo está ordenado por odómetro DESC → [0] = última, [1] = anterior
   const odoFin      = comprasConOdo[0]?.odometro ?? null;
   const odoFinFecha = comprasConOdo[0]?.fecha    ?? null;
@@ -153,10 +156,15 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
     ? odoFin - odoInicio
     : null;
 
-  // Índice de consumo: km entre las dos últimas lecturas / litros del mes
-  const indiceConsumoRealMes = kmEntreOdo != null && litrosMes > 0
-    ? kmEntreOdo / litrosMes
-    : null;
+  // Índice de consumo del período: promedio de consumo_real de las cargas del mes.
+  // Se usa consumo_real (ya calculado al registrar cada carga) en lugar de dividir
+  // kmEntreOdo (historial completo) entre litrosMes (solo el período), que mezcla
+  // períodos distintos y produce valores incorrectos.
+  const indiceConsumoRealMes = React.useMemo(() => {
+    const movsCon = comprasMes.filter(m => m.consumo_real != null && m.consumo_real > 0);
+    if (movsCon.length === 0) return null;
+    return movsCon.reduce((s, m) => s + m.consumo_real, 0) / movsCon.length;
+  }, [comprasMes]);
 
   // ── Consumo verificado por nivel de tanque ────────────────────────────────
   // Requiere dos cargas consecutivas con nivel_tanque registrado
@@ -225,12 +233,12 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   const ultimasHorasFecha = movsConHoras[0]?.fecha     ?? null;
   const horasMes = React.useMemo(() => {
     if (!esEquipoConsumidor) return 0;
-    const lecturaMes   = movsConHoras.find(m => m.fecha?.startsWith(mesActual))?.horas_uso ?? null;
-    const lecturaAntes = movsConHoras.find(m => !m.fecha?.startsWith(mesActual) && (m.fecha || '') < mesActual)?.horas_uso ?? null;
+    const lecturaMes   = movsConHoras.find(m => m.fecha?.startsWith(periodo))?.horas_uso ?? null;
+    const lecturaAntes = movsConHoras.find(m => !m.fecha?.startsWith(periodo) && (m.fecha || '') < periodo)?.horas_uso ?? null;
     if (lecturaMes == null) return 0;
     if (lecturaAntes == null) return 0;
     return Math.max(0, lecturaMes - lecturaAntes);
-  }, [esEquipoConsumidor, movsConHoras, mesActual]);
+  }, [esEquipoConsumidor, movsConHoras, periodo]);
 
   // ── Referencias de consumo ────────────────────────────────────────────────
   const consumoRealRef    = consumidor.datos_vehiculo?.indice_consumo_real      ?? null;
@@ -281,9 +289,9 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   const despachadoMes = React.useMemo(() => {
     if (!esTanqueConsumidor) return 0;
     return movimientos
-      .filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id && m.fecha?.startsWith(mesActual))
+      .filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidor.id && m.fecha?.startsWith(periodo))
       .reduce((s, m) => s + (m.litros || 0), 0);
-  }, [esTanqueConsumidor, movimientos, consumidor.id, mesActual]);
+  }, [esTanqueConsumidor, movimientos, consumidor.id, periodo]);
 
   const stockPct = capacidad && stockActual != null ? (stockActual / capacidad) * 100 : null;
 
@@ -350,7 +358,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   // ━━━━━━━━━━━━━━━━━━━━ USO DE ALMACÉN / AUTORIZO CARD ━━━━━━━━━━━━━━━━━━━━━
   // Autorizaciones ad-hoc: reciben DESPACHO (no COMPRA); no tienen odómetro ni monto
   if (esAlmacenUso(consumidor)) {
-    const despachosRecibidosMes = despachosRecibidos.filter(m => m.fecha?.startsWith(mesActual));
+    const despachosRecibidosMes = despachosRecibidos.filter(m => m.fecha?.startsWith(periodo));
     const ultimaAutorizacion    = despachosRecibidos[0] ?? null;
     const litrosMesAlmacen      = despachosRecibidosMes.reduce((s, m) => s + (m.litros || 0), 0);
     const numAlmacenMes         = despachosRecibidosMes.length;
@@ -395,7 +403,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
 
           {/* Stats: mes vs histórico */}
           <div className="grid grid-cols-2 gap-1.5 text-xs">
-            <Stat label={`Este mes (${numAlmacenMes} autorización${numAlmacenMes !== 1 ? 'es' : ''})`}>
+            <Stat label={`${mesFiltro === 'ALL' ? 'Este mes' : 'Período'} (${numAlmacenMes} autorización${numAlmacenMes !== 1 ? 'es' : ''})`}>
               {numAlmacenMes > 0
                 ? <p className="font-semibold text-slate-700">{litrosMesAlmacen.toFixed(1)} L</p>
                 : <p className="text-slate-300 font-medium">Sin autorizaciones</p>}
@@ -559,10 +567,12 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
         {!esEquipoConsumidor && (
           <div className="rounded-lg border border-slate-100 bg-slate-50/60 text-xs overflow-hidden">
             <p className="text-[9px] uppercase tracking-widest px-2.5 pt-2 pb-1 flex items-center gap-1.5">
-              <span className={esMesActual ? 'text-slate-400' : 'text-amber-500'}>
+              <span className={esMesActual ? 'text-slate-400' : mesFiltro !== 'ALL' ? 'text-sky-500' : 'text-amber-500'}>
                 {esMesActual
                   ? 'Resumen del mes'
-                  : `Último activo · ${new Date(mesReferencia + '-02').toLocaleDateString('es', { month: 'long', year: 'numeric' })}`}
+                  : mesFiltro !== 'ALL'
+                    ? `Período · ${new Date(mesReferencia + '-02').toLocaleDateString('es', { month: 'long', year: 'numeric' })}`
+                    : `Último activo · ${new Date(mesReferencia + '-02').toLocaleDateString('es', { month: 'long', year: 'numeric' })}`}
               </span>
             </p>
 
@@ -586,7 +596,11 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
             {/* Fila litros / consumo */}
             <div className="grid grid-cols-3 gap-0">
               <div className="px-2.5 py-1.5 border-r border-slate-100">
-                <p className="text-[9px] text-slate-400 leading-none mb-0.5">Litros del mes</p>
+                <p className="text-[9px] text-slate-400 leading-none mb-0.5">
+                  {esMesActual
+                    ? 'Total abastecido'
+                    : `Total abastecido (${new Date(mesReferencia + '-02').toLocaleDateString('es', { month: 'short', year: 'numeric' })})`}
+                </p>
                 <p className="font-semibold text-slate-700">{litrosMes > 0 ? `${litrosMes.toFixed(1)} L` : <span className="text-slate-300 font-normal">—</span>}</p>
                 {gastoMes > 0 && <p className="text-[9px] text-slate-400">{formatMonto(gastoMes)}</p>}
                 {numCargasMes > 0 && <p className="text-[9px] text-slate-400">{numCargasMes} carga{numCargasMes !== 1 ? 's' : ''}</p>}
@@ -676,9 +690,10 @@ function ConsumidorCard({ consumidor, movimientos, hoy }) {
   );
 }
 
-export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, movimientos }) {
+export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, movimientos, mesFiltro = 'ALL' }) {
   const hoy = new Date();
   const mesActual = hoy.toISOString().slice(0, 7);
+  const periodo = mesFiltro === 'ALL' ? mesActual : mesFiltro;
   const consumidoresActivos = consumidores.filter(c => c.activo);
 
   const grupos = tiposConsumidor
@@ -714,11 +729,11 @@ export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, mov
         const isOpen = openGroups.has(tipo.id);
 
         const comprasMes = movimientos.filter(m =>
-          m.tipo === 'COMPRA' && m.fecha?.startsWith(mesActual) &&
+          m.tipo === 'COMPRA' && m.fecha?.startsWith(periodo) &&
           items.some(c => c.id === m.consumidor_id)
         );
         const despachosMesRecibidos = movimientos.filter(m =>
-          m.tipo === 'DESPACHO' && m.fecha?.startsWith(mesActual) &&
+          m.tipo === 'DESPACHO' && m.fecha?.startsWith(periodo) &&
           items.some(c => c.id === m.consumidor_id)
         );
         const litrosMes = comprasMes.reduce((s, m) => s + (m.litros || 0), 0)
@@ -797,7 +812,7 @@ export default function ConsumidoresPorTipo({ consumidores, tiposConsumidor, mov
                 )}
                 <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {itemsFiltrados.map(c => (
-                    <ConsumidorCard key={c.id} consumidor={c} movimientos={movimientos} hoy={hoy} />
+                    <ConsumidorCard key={c.id} consumidor={c} movimientos={movimientos} hoy={hoy} mesFiltro={mesFiltro} />
                   ))}
                 </div>
               </div>

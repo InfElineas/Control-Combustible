@@ -53,12 +53,12 @@ export function computeVehiculoMonthlyStats(vehiculo, movimientos = [], month = 
   const abastecimientosMes = movsMes.filter((m) => m.tipo === 'COMPRA' || m.tipo === 'DESPACHO');
 
   const litrosMes = abastecimientosMes.reduce((s, m) => s + (m.litros || 0), 0);
-  const consumoMovs = comprasMes.filter((m) => m.consumo_real != null && m.consumo_real > 0);
+  const consumoMovs = abastecimientosMes.filter((m) => m.consumo_real != null && m.consumo_real > 0);
   const consumoMes = consumoMovs.length > 0
     ? consumoMovs.reduce((s, m) => s + (m.consumo_real || 0), 0) / consumoMovs.length
     : 0;
 
-  const odometrosMes = comprasMes.filter((m) => m.odometro != null).map((m) => Number(m.odometro));
+  const odometrosMes = abastecimientosMes.filter((m) => m.odometro != null).map((m) => Number(m.odometro));
   const odometroInicio = odometrosMes.length > 0 ? Math.min(...odometrosMes) : null;
 
   const ultimaCarga = [...movsVeh].reverse().find((m) => m.tipo === 'COMPRA' || m.tipo === 'DESPACHO');

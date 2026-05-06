@@ -266,7 +266,7 @@ export default function Dashboard() {
   const alertasConsumo = consumidoresActivos.filter(c => {
     const consumoRef = c.datos_vehiculo?.indice_consumo_real || c.datos_vehiculo?.indice_consumo_fabricante;
     const movsConConsumo = movimientos
-      .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id && m.consumo_real != null && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
+      .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.consumo_real != null && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
       .sort((a, b) => b.odometro - a.odometro);
     if (!consumoRef || movsConConsumo.length === 0) return false;
     const consumoUltimo = movsConConsumo[0].consumo_real;
@@ -702,6 +702,7 @@ export default function Dashboard() {
             consumidores={consumidores}
             tiposConsumidor={tiposConsumidor}
             movimientos={movimientos}
+            mesFiltro={mesFiltro}
           />
           <Link to={createPageUrl('Movimientos')} className="text-xs text-sky-600 hover:underline mt-3 inline-block">
             Ver todos los movimientos →

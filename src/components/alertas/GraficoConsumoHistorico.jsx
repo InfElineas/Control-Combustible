@@ -22,7 +22,7 @@ function CustomTooltip({ active, payload, label }) {
 export default function GraficoConsumoHistorico({ consumidor, movimientos, configAlerta }) {
   // Cargas con odómetro y consumo real, ordenadas cronológicamente
   const cargas = movimientos
-    .filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidor.id && m.consumo_real != null)
+    .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === consumidor.id && m.consumo_real != null)
     .sort((a, b) => a.odometro - b.odometro);
 
   if (cargas.length < 2) {

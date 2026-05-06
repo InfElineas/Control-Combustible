@@ -23,14 +23,17 @@ export default function ConsumidorDetalleModal({ consumidorId, todosMovimientos,
   const stats = useMemo(() => {
     if (!consumidorId || !todosMovimientos) return null;
     const compras = todosMovimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === consumidorId);
-    const despachos = todosMovimientos.filter(m => m.tipo === 'DESPACHO' && (m.consumidor_id === consumidorId || m.consumidor_origen_id === consumidorId));
-    const totalLitros = compras.reduce((s, m) => s + (m.litros || 0), 0);
+    const despachosRecibidos = todosMovimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_id === consumidorId);
+    const despachosDespachados = todosMovimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === consumidorId);
+    const abastecimientos = [...compras, ...despachosRecibidos];
+    const totalLitros = abastecimientos.reduce((s, m) => s + (m.litros || 0), 0);
     const totalGasto = compras.reduce((s, m) => s + (m.monto || 0), 0);
-    const ultimoCarga = compras.sort((a, b) => b.fecha?.localeCompare(a.fecha))[0];
-    const consumoPromedio = compras.filter(m => m.consumo_real != null).length > 0
-      ? compras.filter(m => m.consumo_real != null).reduce((s, m) => s + m.consumo_real, 0) / compras.filter(m => m.consumo_real != null).length
+    const ultimoCarga = [...abastecimientos].sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))[0];
+    const conConsumo = abastecimientos.filter(m => m.consumo_real != null);
+    const consumoPromedio = conConsumo.length > 0
+      ? conConsumo.reduce((s, m) => s + m.consumo_real, 0) / conConsumo.length
       : null;
-    return { totalLitros, totalGasto, ultimoCarga, consumoPromedio, totalCompras: compras.length, totalDespachos: despachos.length };
+    return { totalLitros, totalGasto, ultimoCarga, consumoPromedio, totalCompras: compras.length, totalDespachos: despachosRecibidos.length + despachosDespachados.length };
   }, [consumidorId, todosMovimientos]);
 
   if (!consumidor) return null;

@@ -11,9 +11,8 @@ import { toast } from "sonner";
 import { Plus, Pencil, Power, Trash2, CreditCard } from 'lucide-react';
 import StatusBadge from '@/components/ui-helpers/StatusBadge';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
-import { calcularSaldo, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 
-const emptyForm = { id_tarjeta: '', alias: '', moneda: 'CUP', saldo_inicial: 0, umbral_alerta: '', activa: true };
+const emptyForm = { id_tarjeta: '', alias: '', moneda: 'CUP', activa: true };
 
 export default function Tarjetas() {
   const queryClient = useQueryClient();
@@ -42,7 +41,7 @@ export default function Tarjetas() {
 
   const openEdit = (t) => {
     setEditing(t);
-    setForm({ id_tarjeta: t.id_tarjeta, alias: t.alias || '', moneda: t.moneda, saldo_inicial: t.saldo_inicial, umbral_alerta: t.umbral_alerta ?? '', activa: t.activa });
+    setForm({ id_tarjeta: t.id_tarjeta, alias: t.alias || '', moneda: t.moneda, activa: t.activa });
     setDialogOpen(true);
   };
 
@@ -51,7 +50,7 @@ export default function Tarjetas() {
     if (!editing && tarjetas.some(t => t.id_tarjeta === form.id_tarjeta.trim())) {
       toast.error('Ya existe una tarjeta con ese número'); return;
     }
-    const data = { ...form, saldo_inicial: parseFloat(form.saldo_inicial) || 0, umbral_alerta: form.umbral_alerta !== '' ? parseFloat(form.umbral_alerta) : null };
+    const data = { ...form };
     if (editing) {
       updateMut.mutate({ id: editing.id, d: data });
     } else {
@@ -84,9 +83,7 @@ export default function Tarjetas() {
       </div>
 
       <div className="grid gap-3">
-        {tarjetas.map(t => {
-          const saldo = calcularSaldo(t, movimientos);
-          return (
+        {tarjetas.map(t => (
             <Card key={t.id} className={`border-0 shadow-sm ${!t.activa ? 'opacity-60' : ''}`}>
               <CardContent className="p-4 flex items-center gap-4">
                 <div className="w-10 h-10 rounded-xl bg-sky-50 flex items-center justify-center shrink-0">
@@ -99,12 +96,6 @@ export default function Tarjetas() {
                   </div>
                   <p className="text-xs text-slate-400 truncate">{t.id_tarjeta} · {t.moneda}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className={`text-sm font-bold ${saldo < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                    {formatMonto(saldo, t.moneda)}
-                  </p>
-                  <p className="text-[10px] text-slate-400">Saldo</p>
-                </div>
                 <div className="flex gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(t)}><Pencil className="w-3.5 h-3.5" /></Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(t)}><Power className={`w-3.5 h-3.5 ${t.activa ? 'text-emerald-500' : 'text-slate-300'}`} /></Button>
@@ -112,8 +103,7 @@ export default function Tarjetas() {
                 </div>
               </CardContent>
             </Card>
-          );
-        })}
+        ))}
         {tarjetas.length === 0 && <p className="text-sm text-slate-400 text-center py-12">No hay tarjetas</p>}
       </div>
 
@@ -129,27 +119,17 @@ export default function Tarjetas() {
               <Label className="text-xs text-slate-500">Alias</Label>
               <Input value={form.alias} onChange={e => setForm(f => ({ ...f, alias: e.target.value }))} placeholder="Nombre descriptivo" className="mt-1" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-slate-500">Moneda</Label>
-                <Select value={form.moneda} onValueChange={v => setForm(f => ({ ...f, moneda: v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CUP">CUP</SelectItem>
-                    <SelectItem value="USD">USD</SelectItem>
-                    <SelectItem value="EUR">EUR</SelectItem>
-                    <SelectItem value="MLC">MLC</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-slate-500">Saldo inicial</Label>
-                <Input type="number" step="0.01" value={form.saldo_inicial} onChange={e => setForm(f => ({ ...f, saldo_inicial: e.target.value }))} className="mt-1" />
-              </div>
-            </div>
             <div>
-              <Label className="text-xs text-slate-500">Umbral alerta (opcional)</Label>
-              <Input type="number" step="0.01" value={form.umbral_alerta} onChange={e => setForm(f => ({ ...f, umbral_alerta: e.target.value }))} placeholder="Saldo mínimo" className="mt-1" />
+              <Label className="text-xs text-slate-500">Moneda</Label>
+              <Select value={form.moneda} onValueChange={v => setForm(f => ({ ...f, moneda: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CUP">CUP</SelectItem>
+                  <SelectItem value="USD">USD</SelectItem>
+                  <SelectItem value="EUR">EUR</SelectItem>
+                  <SelectItem value="MLC">MLC</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

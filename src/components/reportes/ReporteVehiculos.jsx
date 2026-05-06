@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
-import CSVExport from '@/components/ui-helpers/CSVExport';
+import ExportButton from '@/components/ui-helpers/ExportButton';
 import { ArrowUpDown, List } from 'lucide-react';
 import LogConsumidorMovimientosModal from '@/components/reportes/LogConsumidorMovimientosModal';
 
@@ -164,7 +164,7 @@ export default function ReporteVehiculos({ consumidores, movimientos }) {
               <SortBtn field="monto" label="Monto" />
               <SortBtn field="compras" label="#" />
             </div>
-            <CSVExport data={csvData} columns={csvColumns} filename="reporte_consumidores" />
+            <ExportButton data={csvData} columns={csvColumns} filename="reporte_consumidores" title="Reporte por Consumidor" />
           </div>
         </CardHeader>
         <CardContent className="p-0">

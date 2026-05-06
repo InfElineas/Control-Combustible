@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertTriangle, TrendingUp } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
-import CSVExport from '@/components/ui-helpers/CSVExport';
+import ExportButton from '@/components/ui-helpers/ExportButton';
 
 // Calcula el estado de alerta comparando consumo real vs referencia
 function getAlertaStatus(consumoReal, consumoRef, umbralAlerta, umbralCritico) {
@@ -34,8 +34,10 @@ export default function ReporteConsumo({ consumidores, movimientos }) {
         const montoTotal = movsCompra.reduce((s, m) => s + (m.monto || 0), 0);
         const cargas = movsCompra.length;
 
-        // Último consumo registrado
-        const movsConOdo = movsCompra.filter(m => m.consumo_real != null).sort((a, b) => b.fecha.localeCompare(a.fecha));
+        // Consumo real: incluye COMPRA y DESPACHO (vehículos abastecidos desde reserva también registran km/L)
+        const movsConOdo = movimientos
+          .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.consumo_real != null)
+          .sort((a, b) => b.fecha.localeCompare(a.fecha));
         const consumoUltimo = movsConOdo.length > 0 ? movsConOdo[0].consumo_real : null;
 
         // Consumo promedio (media de todos los consumos registrados)
@@ -129,7 +131,7 @@ export default function ReporteConsumo({ consumidores, movimientos }) {
       <Card className="border-0 shadow-sm">
         <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
           <CardTitle className="text-sm font-semibold text-slate-700">Consumo por Consumidor</CardTitle>
-          <CSVExport data={reporte} columns={csvConsumo} filename="reporte_consumo" />
+          <ExportButton data={reporte} columns={csvConsumo} filename="reporte_consumo" title="Reporte de Consumo" />
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
