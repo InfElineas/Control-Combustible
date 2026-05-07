@@ -1,7 +1,7 @@
 # Reporte de Desarrollo — Sistema de Control de Combustible
 
-**Fecha de emisión:** 26 de abril de 2026  
-**Versión:** `main` · commit `95b1ca9`  
+**Fecha de emisión:** 07 de mayo de 2026  
+**Versión:** `main` · commit `1cbf9a6`  
 **Plataforma:** React 18 + Vite 6 + Supabase  
 
 ---
@@ -222,33 +222,351 @@ La tabla `movimiento` ya tiene los campos `km_recorridos`, `consumo_real` y `odo
 - Mensaje de error visible si la consulta falla.
 - `retry: 1` y `staleTime: 60 000 ms` en la consulta de usuarios para mejor resiliencia.
 
-### 2.6 Reportes (en progreso en esta sesión)
+### 2.6 Exportación de reportes
 
-- Instaladas dependencias `jspdf-autotable` y `exceljs` para exportación profesional.
-- Diseño en implementación: botones CSV / Excel / PDF por reporte, con formato profesional (encabezado corporativo, KPIs en cabecera, colores por estado, totales).
-
----
-
-## 3. Arquitectura de roles — Resumen
-
-| Rol | Recargas | Compras | Despachos | Finanzas | Catálogos | Admin |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **superadmin** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **operador** | — | ✓ | ✓ | — | ✓ | — |
-| **económico** | ✓ | — | — | ✓ | — | — |
-| **auditor** | — | — | — | — | — | — |
+- Instaladas dependencias `jspdf-autotable` y `exceljs`.
+- Componente `ExportButton` (`src/components/ui-helpers/ExportButton.jsx`) disponible para adjuntar a cualquier tabla del sistema y exportar en CSV, Excel o PDF con formato profesional.
 
 ---
 
-## 4. Pendientes de sesión actual
+## 3. Nuevas funcionalidades — Sesión 07/05/2026
 
-| Tarea | Prioridad |
+### 3.1 Sistema de auditoría completo (`audit_log`)
+
+**Commits:** `dda1e52`  
+**Archivos:** `src/api/auditLog.js`, `src/api/base44Client.js`, `src/pages/AdminPanel.jsx`
+
+Se sustituyó la pestaña "Auditoría de Movimientos" (que solo replicaba el listado de movimientos) por un **registro de auditoría real** que captura automáticamente toda acción realizada en el sistema.
+
+#### Cómo funciona
+
+El módulo `auditLog.js` expone la función `logAudit()`, que se llama de forma fire-and-forget tras cada operación. La identidad del usuario se obtiene de Supabase Auth con caché de 5 minutos para no impactar el rendimiento.
+
+El factory `createEntity()` en `base44Client.js` fue extendido para auto-llamar `logAudit()` en cada `create`, `update` y `delete`. Para las eliminaciones, el sistema toma un **snapshot completo del registro antes de borrarlo** y lo persiste en el payload del log, permitiendo reconstruir cualquier dato eliminado.
+
+#### Campos registrados en `audit_log`
+
+| Campo | Descripción |
 |---|---|
-| Completar implementación de ExportActions (Excel + PDF) | Alta |
-| Aplicar RLS actualizado en Supabase Dashboard (ejecutar SQL) | Alta |
-| Build y push del módulo de reportes | Alta |
-| Implementar rutas predefinidas (Opción A del punto 1.10) | Media |
+| `user_id` / `user_email` / `user_name` | Identidad del usuario que realizó la acción |
+| `action` | `CREATE`, `UPDATE`, `DELETE`, `ROLE_CHANGE` |
+| `entity_type` | Entidad afectada (`Movimiento`, `Consumidor`, `Tarjeta`, `UserRole`, etc.) |
+| `entity_id` | ID del registro afectado |
+| `entity_label` | Etiqueta legible del registro (nombre, matrícula, etc.) |
+| `payload` | Estado completo del registro en formato JSON |
+| `metadata` | Para `UPDATE`: campos y valores modificados; para `ROLE_CHANGE`: rol anterior y nuevo |
+| `created_at` | Timestamp UTC de la operación |
+
+#### Vista en AdminPanel
+
+El tab de Auditoría muestra un feed de eventos con:
+- KPIs: total de eventos, creaciones, actualizaciones y eliminaciones del período
+- Filtros por acción y entidad
+- Búsqueda de texto libre
+- Filas expandibles con el payload JSON completo
+- Refresco automático cada 60 segundos
+
+#### Migración SQL requerida
+
+```sql
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  user_id      UUID,
+  user_email   TEXT,
+  user_name    TEXT,
+  action       TEXT NOT NULL,
+  entity_type  TEXT,
+  entity_id    TEXT,
+  entity_label TEXT,
+  payload      JSONB,
+  metadata     JSONB
+);
+
+-- RLS: solo lectura para usuarios autenticados; inserción desde cualquier rol
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "audit_log_select" ON audit_log FOR SELECT TO authenticated USING (true);
+CREATE POLICY "audit_log_insert" ON audit_log FOR INSERT TO authenticated WITH CHECK (true);
+```
 
 ---
 
-*Documento generado el 26/04/2026 · Sistema de Control de Combustible · InfElineas*
+### 3.2 Corrección del filtro COMPRA/DESPACHO en análisis de consumo
+
+**Commit:** `dda1e52`  
+**Archivos afectados:** 10 archivos en `src/`
+
+#### Problema detectado
+
+Todos los cálculos de consumo (km/L, historial de odómetro, alertas, reportes) filtraban únicamente `tipo === 'COMPRA'`. Los vehículos abastecidos exclusivamente mediante DESPACHO desde reservas internas quedaban excluidos de todos los análisis, mostrando "Sin datos de odómetro" aunque tuviesen múltiples registros.
+
+#### Regla aplicada
+
+| Cálculo | Tipos incluidos |
+|---|---|
+| Litros consumidos / km/L / odómetro / alertas | `COMPRA` + `DESPACHO` (ambos) |
+| Monto gastado / gasto financiero | Solo `COMPRA` (DESPACHO no tiene precio directo) |
+
+#### Archivos corregidos
+
+| Archivo | Corrección |
+|---|---|
+| `src/pages/Alertas.jsx` | `AlertaRow` y `consumidoresConEstado` useMemo (dos puntos independientes) |
+| `src/pages/Dashboard.jsx` | `alertasConsumo` filter |
+| `src/pages/Catalogos.jsx` | `historialConductor` odómetro filter |
+| `src/lib/fuel-analytics.js` | `consumoMovs` y `odometrosMes` derivados |
+| `src/components/alertas/GraficoConsumoHistorico.jsx` | Filter de movimientos con consumo |
+| `src/components/reportes/ReporteConsumo.jsx` | `movsConOdo` derivation |
+| `src/components/reportes/LogConsumidorMovimientosModal.jsx` | `totalLitros` |
+| `src/components/movimientos/LogConsumidorModal.jsx` | `totalLitros` |
+| `src/components/movimientos/ConsumidorDetalleModal.jsx` | Stats completos reescritos |
+
+---
+
+### 3.3 Filtro URL por `movimientoId` en Movimientos
+
+**Commit:** `dda1e52`  
+**Archivo:** `src/pages/Movimientos.jsx`
+
+Al hacer clic en "Ver →" en el modal de alertas críticas del Dashboard, el sistema navega a `/Movimientos?movimientoId=<id>` y:
+
+1. Resalta únicamente ese movimiento en la tabla (oculta el resto)
+2. Abre automáticamente el panel de detalle de ese movimiento
+3. Muestra una barra de aviso azul con el nombre del consumidor
+4. El botón "✕ Quitar filtro" limpia el parámetro y restaura la vista completa
+
+Implementación con `useSearchParams` de react-router-dom y estado `pinMovId`.
+
+---
+
+### 3.4 Módulo de Rutas
+
+**Commits:** `dda1e52` (implementación inicial), `1cbf9a6` (tipos de viaje y refinamientos)  
+**Archivos:** `src/pages/Rutas.jsx`, `src/api/base44Client.js` (entidades `Ruta` y `AsignacionRuta`)
+
+#### Descripción general
+
+Módulo operativo independiente del combustible. Registra qué vehículo hizo qué trayecto cada día, complementando los registros de carga sin reemplazarlos.
+
+#### Tablas en Supabase
+
+| Tabla | Propósito |
+|---|---|
+| `ruta` | Catálogo de rutas predefinidas (nombre, puntos, distancia, frecuencia) |
+| `asignacion_ruta` | Registro diario: vehículo + ruta + conductor + km reales + estado |
+
+#### Migración SQL requerida
+
+```sql
+-- Tabla ruta
+CREATE TABLE IF NOT EXISTS ruta (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nombre          TEXT NOT NULL,
+  punto_inicio    TEXT,
+  punto_fin       TEXT,
+  municipio       TEXT,
+  distancia_km    NUMERIC,
+  tiempo_estimado TEXT,
+  frecuencia      TEXT DEFAULT 'Diario',
+  activa          BOOLEAN DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Tabla asignacion_ruta
+CREATE TABLE IF NOT EXISTS asignacion_ruta (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fecha                   DATE NOT NULL,
+  tipo_viaje              TEXT DEFAULT 'regular',
+  ruta_id                 UUID REFERENCES ruta(id),
+  descripcion_emergencia  TEXT,
+  consumidor_id           UUID,
+  consumidor_nombre       TEXT,
+  conductor_id            UUID,
+  conductor_nombre        TEXT,
+  km_reales               NUMERIC,
+  observaciones           TEXT,
+  estado                  TEXT DEFAULT 'completada',
+  created_at              TIMESTAMPTZ DEFAULT now()
+);
+
+-- Columna tipo_viaje (si la tabla ya existe)
+ALTER TABLE asignacion_ruta
+  ADD COLUMN IF NOT EXISTS tipo_viaje TEXT DEFAULT 'regular';
+
+UPDATE asignacion_ruta
+SET tipo_viaje = CASE
+  WHEN ruta_id IS NOT NULL THEN 'regular'
+  ELSE 'viaje_extra'
+END
+WHERE tipo_viaje IS NULL;
+```
+
+#### Tipos de viaje
+
+| Tipo | Descripción | Requiere ruta del catálogo |
+|---|---|:---:|
+| `regular` | Ruta planificada del catálogo | Sí |
+| `carga_mercancias` | Viajes de los comerciales con mercancía | No |
+| `mensajeria` | Entregas de documentos u objetos | No |
+| `viaje_extra` | Salidas imprevistas o de contingencia | No |
+
+#### Pestañas del módulo
+
+- **Viajes del día:** selector de fecha + lista de asignaciones con badge de tipo y estado
+- **Catálogo de rutas:** CRUD de rutas predefinidas, filtro Activas/Inactivas
+- **Estadísticas:** rutas más frecuentes, actividad por vehículo, desglose porcentual por tipo de viaje
+
+#### Restricciones operativas
+
+- Solo los consumidores de tipo **vehículo** aparecen en el selector (se excluyen tanques, reservas, equipos y generadores por nombre de tipo).
+- La relación con movimientos de combustible es **actualmente manual** (correlación por fecha + vehículo). Un enlace directo `asignacion_ruta_id` en `movimiento` es el siguiente paso recomendado para reportes cruzados precisos.
+
+#### Roles con acceso
+
+`superadmin`, `operador`, `auditor` (lectura)
+
+---
+
+### 3.5 Centro de ayuda (`/Ayuda`)
+
+**Commit:** `1cbf9a6`  
+**Archivo:** `src/pages/Ayuda.jsx`
+
+Página de documentación completa del sistema, accesible para **todos los roles**.
+
+#### Acceso
+
+- **Botón flotante `?`** (azul, esquina inferior derecha) visible en todas las pantallas excepto la propia página de ayuda
+- **Enlace "Centro de ayuda"** en el pie del sidebar desktop (junto al botón de cerrar sesión)
+
+#### Secciones documentadas
+
+| Sección | Contenido |
+|---|---|
+| Introducción | Flujo general, tipos de movimiento, roles de usuario |
+| Movimientos | COMPRA vs DESPACHO, campos, fórmula km/L, filtros, acceso directo desde alertas |
+| Dashboard | KPIs, cálculo de saldo, fórmula de desviación de consumo, alertas críticas |
+| Consumidores | Tipos, cálculo de stock de reservas, indicadores por vehículo |
+| Finanzas | Tarjetas corporativas, fórmula de saldo, explicación de compras directas vs. DESPACHO |
+| Alertas | Fórmula de desviación, umbrales, historial gráfico, notificación por email |
+| Reportes | Reporte de Vehículos, Reporte de Consumo, barra de capacidad |
+| Rutas | Tipos de viaje, catálogo, estadísticas, relación con combustible |
+| Conductores | Campos, conductor del mes |
+| Catálogos | Parámetros técnicos, precios vigentes, fórmula de precio vigente |
+| Configuración | Gestión de precios, importación masiva |
+| Administración | Roles, audit log, trazabilidad de eliminaciones |
+| Glosario | 19 términos definidos (COMPRA, DESPACHO, km/L, saldo, umbral, etc.) |
+
+#### Características de la UI
+
+- Sidebar navegable (desktop) / pills horizontales (mobile)
+- Buscador de secciones
+- Callout boxes de 4 tipos: `info`, `tip`, `warning`, `formula`
+- Tablas de referencia rápida
+- Fórmulas en bloque de código monoespacio
+- Scroll al inicio al cambiar de sección
+
+---
+
+## 4. Arquitectura de roles — Resumen actualizado
+
+| Rol | Movimientos | Finanzas | Catálogos | Alertas | Rutas | Reportes | Admin | Ayuda |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **superadmin** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **operador** | ✓ | — | ✓ | ✓ | ✓ | ✓ | — | ✓ |
+| **económico** | ✓ (lectura) | ✓ | — | — | — | ✓ | — | ✓ |
+| **auditor** | ✓ (lectura) | — | — | — | ✓ (lectura) | ✓ | — | ✓ |
+
+---
+
+## 5. Historial de commits relevantes
+
+| Commit | Fecha | Descripción |
+|---|---|---|
+| `1cbf9a6` | 07/05/2026 | Centro de ayuda + tipos de viaje en Rutas |
+| `dda1e52` | 07/05/2026 | Audit log, módulo Rutas, fix COMPRA/DESPACHO, URL filtering |
+| `323313d` | 26/04/2026 | UI improvements, role fixes, dashboard overhaul |
+| `7c04f4c` | 26/04/2026 | Módulo Finanzas, fix acceso rol económico |
+| `95b1ca9` | 26/04/2026 | Security hardening, feature completions |
+
+---
+
+## 6. Migraciones SQL pendientes de ejecutar en Supabase
+
+Las siguientes sentencias deben ejecutarse en el **SQL Editor de Supabase** si aún no se han aplicado:
+
+```sql
+-- 1. Tabla de auditoría
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at   TIMESTAMPTZ DEFAULT now(),
+  user_id      UUID,
+  user_email   TEXT,
+  user_name    TEXT,
+  action       TEXT NOT NULL,
+  entity_type  TEXT,
+  entity_id    TEXT,
+  entity_label TEXT,
+  payload      JSONB,
+  metadata     JSONB
+);
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "audit_log_select" ON audit_log FOR SELECT TO authenticated USING (true);
+CREATE POLICY "audit_log_insert" ON audit_log FOR INSERT TO authenticated WITH CHECK (true);
+
+-- 2. Tablas del módulo Rutas
+CREATE TABLE IF NOT EXISTS ruta (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nombre          TEXT NOT NULL,
+  punto_inicio    TEXT,
+  punto_fin       TEXT,
+  municipio       TEXT,
+  distancia_km    NUMERIC,
+  tiempo_estimado TEXT,
+  frecuencia      TEXT DEFAULT 'Diario',
+  activa          BOOLEAN DEFAULT true,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS asignacion_ruta (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  fecha                   DATE NOT NULL,
+  tipo_viaje              TEXT DEFAULT 'regular',
+  ruta_id                 UUID REFERENCES ruta(id),
+  descripcion_emergencia  TEXT,
+  consumidor_id           UUID,
+  consumidor_nombre       TEXT,
+  conductor_id            UUID,
+  conductor_nombre        TEXT,
+  km_reales               NUMERIC,
+  observaciones           TEXT,
+  estado                  TEXT DEFAULT 'completada',
+  created_at              TIMESTAMPTZ DEFAULT now()
+);
+
+-- 3. Columna tipo_viaje (si asignacion_ruta ya existía sin esa columna)
+ALTER TABLE asignacion_ruta
+  ADD COLUMN IF NOT EXISTS tipo_viaje TEXT DEFAULT 'regular';
+
+UPDATE asignacion_ruta
+SET tipo_viaje = CASE
+  WHEN ruta_id IS NOT NULL THEN 'regular'
+  ELSE 'viaje_extra'
+END
+WHERE tipo_viaje IS NULL;
+```
+
+---
+
+## 7. Tareas pendientes
+
+| Tarea | Prioridad | Notas |
+|---|---|---|
+| Ejecutar migraciones SQL de `audit_log` y tablas de Rutas en Supabase | **Alta** | Requerido para que auditoría y rutas funcionen en producción |
+| Enlace directo `asignacion_ruta_id` en tabla `movimiento` | Media | Permitiría reportes cruzados ruta↔combustible precisos |
+| Rol `conductor` para acceso móvil limitado al vehículo propio | Media | Arquitectura ya preparada (ver punto 1.9) |
+| Integración con plataforma GPS para km automáticos | Baja | Requiere identificar API de la plataforma en uso (ver punto 1.10 Opción B) |
+
+---
+
+*Documento actualizado el 07/05/2026 · Sistema de Control de Combustible · InfElineas*
