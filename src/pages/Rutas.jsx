@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import {
   Plus, Navigation, BookOpen, BarChart3,
   Pencil, Trash2, Car, User2,
-  AlertTriangle, CheckCircle2, Clock, XCircle,
+  CheckCircle2, Clock, XCircle,
 } from 'lucide-react';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
@@ -26,12 +26,23 @@ const ESTADO_CFG = {
   cancelada:  { label: 'Cancelada',  cls: 'bg-red-50 text-red-700 border-red-200',            Icon: XCircle      },
 };
 
+const TIPO_VIAJE_CFG = {
+  regular:          { label: 'Regular',          cls: 'bg-sky-50 text-sky-700 border-sky-200'         },
+  carga_mercancias: { label: 'Carga mercancías', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
+  mensajeria:       { label: 'Mensajería',        cls: 'bg-amber-50 text-amber-700 border-amber-200'   },
+  viaje_extra:      { label: 'Viaje extra',       cls: 'bg-orange-50 text-orange-700 border-orange-200'},
+};
+
+function getTipoViaje(asig) {
+  return asig.tipo_viaje || (asig.ruta_id ? 'regular' : 'viaje_extra');
+}
+
 const FRECUENCIA_OPTS = ['Diario', 'Según Planificación', 'Semanal', 'Mensual'];
 
 // ── Diálogo: registrar / editar asignación ───────────────────────────────────
 
 const EMPTY_ASIG = {
-  fecha: hoy(), esEmergencia: false,
+  fecha: hoy(), tipo_viaje: 'regular',
   ruta_id: '', descripcion_emergencia: '',
   consumidor_id: '', consumidor_nombre: '',
   conductor_id: '', conductor_nombre: '',
@@ -41,7 +52,7 @@ const EMPTY_ASIG = {
 function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClose, onSave }) {
   const [form, setForm] = useState(() => asignacion ? {
     fecha:                   asignacion.fecha || hoy(),
-    esEmergencia:            !asignacion.ruta_id,
+    tipo_viaje:              getTipoViaje(asignacion),
     ruta_id:                 asignacion.ruta_id || '',
     descripcion_emergencia:  asignacion.descripcion_emergencia || '',
     consumidor_id:           asignacion.consumidor_id || '',
@@ -54,17 +65,26 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
   } : EMPTY_ASIG);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const rutasRegulares = rutas.filter(r => r.tipo === 'regular' && r.activa);
+  const rutasRegulares = rutas.filter(r => r.activa);
+  const esNoVehiculo = (c) => {
+    const n = (c.tipo_consumidor_nombre || '').toLowerCase();
+    return n.includes('tanque') || n.includes('reserva') || n.includes('almac') ||
+           n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
+  };
+  const vehiculos = consumidores.filter(c => c.activo && !esNoVehiculo(c));
   const rutaSel = rutas.find(r => r.id === form.ruta_id);
 
+  const esRegular = form.tipo_viaje === 'regular';
+
   const handleSave = () => {
-    if (!form.consumidor_id)                                     { toast.error('Selecciona un vehículo'); return; }
-    if (!form.esEmergencia && !form.ruta_id)                     { toast.error('Selecciona una ruta'); return; }
-    if (form.esEmergencia && !form.descripcion_emergencia.trim()) { toast.error('Describe el destino de emergencia'); return; }
+    if (!form.consumidor_id)                                { toast.error('Selecciona un vehículo'); return; }
+    if (esRegular && !form.ruta_id)                         { toast.error('Selecciona una ruta del catálogo'); return; }
+    if (!esRegular && !form.descripcion_emergencia.trim())  { toast.error('Describe el destino o motivo'); return; }
     onSave({
       fecha:                   form.fecha,
-      ruta_id:                 form.esEmergencia ? null : form.ruta_id,
-      descripcion_emergencia:  form.esEmergencia ? form.descripcion_emergencia.trim() : null,
+      tipo_viaje:              form.tipo_viaje,
+      ruta_id:                 esRegular ? form.ruta_id : null,
+      descripcion_emergencia:  !esRegular ? form.descripcion_emergencia.trim() : null,
       consumidor_id:           form.consumidor_id,
       consumidor_nombre:       form.consumidor_nombre,
       conductor_id:            form.conductor_id || null,
@@ -104,27 +124,21 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
             </div>
           </div>
 
-          {/* Toggle emergencia */}
-          <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Ruta de emergencia</p>
-              <p className="text-[11px] text-slate-400">Destino imprevisto o contingencia</p>
-            </div>
-            <Switch checked={form.esEmergencia} onCheckedChange={v => set('esEmergencia', v)} />
+          {/* Tipo de viaje */}
+          <div>
+            <Label className="text-xs text-slate-500">Tipo de viaje *</Label>
+            <Select value={form.tipo_viaje} onValueChange={v => set('tipo_viaje', v)}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(TIPO_VIAJE_CFG).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Ruta regular o descripción emergencia */}
-          {form.esEmergencia ? (
-            <div>
-              <Label className="text-xs text-slate-500">Destino / Motivo *</Label>
-              <Input
-                value={form.descripcion_emergencia}
-                onChange={e => set('descripcion_emergencia', e.target.value)}
-                placeholder="Ej: Traslado urgente a Hospital Pedro Kourí"
-                className="mt-1"
-              />
-            </div>
-          ) : (
+          {/* Ruta del catálogo (solo si es regular) */}
+          {esRegular ? (
             <div>
               <Label className="text-xs text-slate-500">Ruta *</Label>
               <Select value={form.ruta_id} onValueChange={v => set('ruta_id', v)}>
@@ -144,6 +158,20 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
                 </p>
               )}
             </div>
+          ) : (
+            <div>
+              <Label className="text-xs text-slate-500">Destino / Motivo *</Label>
+              <Input
+                value={form.descripcion_emergencia}
+                onChange={e => set('descripcion_emergencia', e.target.value)}
+                placeholder={
+                  form.tipo_viaje === 'carga_mercancias' ? 'Ej: Entrega mercancía almacén norte' :
+                  form.tipo_viaje === 'mensajeria'       ? 'Ej: Documentos sede central' :
+                  'Ej: Traslado imprevisto'
+                }
+                className="mt-1"
+              />
+            </div>
           )}
 
           {/* Vehículo */}
@@ -156,7 +184,7 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
             }}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar vehículo..." /></SelectTrigger>
               <SelectContent>
-                {consumidores.filter(c => c.activo).map(c => (
+                {vehiculos.map(c => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
                   </SelectItem>
@@ -225,7 +253,7 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
 // ── Diálogo: crear / editar ruta del catálogo ────────────────────────────────
 
 const EMPTY_RUTA = {
-  nombre: '', tipo: 'regular',
+  nombre: '',
   punto_inicio: '', punto_fin: '', municipio: '',
   distancia_km: '', tiempo_estimado: '', frecuencia: 'Diario', activa: true,
 };
@@ -233,7 +261,6 @@ const EMPTY_RUTA = {
 function DialogRuta({ ruta, onClose, onSave }) {
   const [form, setForm] = useState(() => ruta ? {
     nombre:           ruta.nombre || '',
-    tipo:             ruta.tipo || 'regular',
     punto_inicio:     ruta.punto_inicio || '',
     punto_fin:        ruta.punto_fin || '',
     municipio:        ruta.municipio || '',
@@ -256,16 +283,6 @@ function DialogRuta({ ruta, onClose, onSave }) {
             <div className="col-span-2">
               <Label className="text-xs text-slate-500">Nombre *</Label>
               <Input value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="CD Polígono" className="mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Tipo</Label>
-              <Select value={form.tipo} onValueChange={v => set('tipo', v)}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="regular">Regular</SelectItem>
-                  <SelectItem value="emergencia">Emergencia</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
             <div>
               <Label className="text-xs text-slate-500">Frecuencia</Label>
@@ -321,18 +338,18 @@ function DialogRuta({ ruta, onClose, onSave }) {
 function AsignacionCard({ asig, ruta, canWrite, onEdit, onDelete }) {
   const cfg = ESTADO_CFG[asig.estado] ?? ESTADO_CFG.completada;
   const { Icon } = cfg;
+  const tipo = getTipoViaje(asig);
+  const tipoCfg = TIPO_VIAJE_CFG[tipo] ?? TIPO_VIAJE_CFG.viaje_extra;
   return (
     <div className="border border-slate-100 rounded-xl p-3 hover:bg-slate-50/40 dark:border-slate-700 dark:hover:bg-slate-800/40 transition-colors">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {!asig.ruta_id && (
-              <Badge variant="outline" className="text-[10px] bg-orange-50 text-orange-700 border-orange-200 shrink-0">
-                <AlertTriangle className="w-2.5 h-2.5 mr-1" />Emergencia
-              </Badge>
-            )}
+            <Badge variant="outline" className={`text-[10px] shrink-0 ${tipoCfg.cls}`}>
+              {tipoCfg.label}
+            </Badge>
             <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {asig.ruta_id ? (ruta?.nombre || '—') : asig.descripcion_emergencia}
+              {tipo === 'regular' ? (ruta?.nombre || '—') : asig.descripcion_emergencia}
             </span>
           </div>
           <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-slate-500">
@@ -425,10 +442,12 @@ export default function Rutas() {
   const mesActual  = hoy().slice(0, 7);
   const asigMes    = useMemo(() => asignaciones.filter(a => a.fecha?.startsWith(mesActual)), [asignaciones, mesActual]);
   const kmMes      = useMemo(() => asigMes.reduce((s, a) => s + (Number(a.km_reales) || 0), 0), [asigMes]);
-  const emergencias = useMemo(() => asigMes.filter(a => !a.ruta_id).length, [asigMes]);
+  const emergencias = useMemo(() => asigMes.filter(a => getTipoViaje(a) !== 'regular').length, [asigMes]);
 
   const rutasFiltradas = useMemo(() =>
-    filtroTipo === 'all' ? rutas : rutas.filter(r => r.tipo === filtroTipo)
+    filtroTipo === 'all'     ? rutas :
+    filtroTipo === 'activa'  ? rutas.filter(r => r.activa) :
+    rutas.filter(r => !r.activa)
   , [rutas, filtroTipo]);
 
   return (
@@ -444,7 +463,7 @@ export default function Rutas() {
         {[
           { label: 'Viajes este mes',   value: asigMes.length,                              cls: 'text-sky-600' },
           { label: 'Km este mes',       value: kmMes > 0 ? `${kmMes.toFixed(0)} km` : '—', cls: 'text-slate-700' },
-          { label: 'Emergencias',       value: emergencias,                                  cls: emergencias > 0 ? 'text-orange-600' : 'text-slate-400' },
+          { label: 'No regulares',      value: emergencias,                                  cls: emergencias > 0 ? 'text-orange-600' : 'text-slate-400' },
           { label: 'Rutas activas',     value: rutas.filter(r => r.activa).length,          cls: 'text-emerald-600' },
         ].map(k => (
           <Card key={k.label} className="border-0 shadow-sm">
@@ -528,7 +547,7 @@ export default function Rutas() {
         <div className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex gap-1">
-              {[['all','Todas'],['regular','Regulares'],['emergencia','Emergencia']].map(([v, l]) => (
+              {[['all','Todas'],['activa','Activas'],['inactiva','Inactivas']].map(([v, l]) => (
                 <button
                   key={v} onClick={() => setFiltroTipo(v)}
                   className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
@@ -559,9 +578,6 @@ export default function Rutas() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{r.nombre}</span>
-                          <Badge variant="outline" className={`text-[10px] shrink-0 ${r.tipo === 'emergencia' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>
-                            {r.tipo === 'emergencia' ? 'Emergencia' : 'Regular'}
-                          </Badge>
                           {!r.activa && <Badge variant="outline" className="text-[10px] text-slate-400">Inactiva</Badge>}
                         </div>
                         <div className="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500">
@@ -660,23 +676,30 @@ export default function Rutas() {
               </CardContent>
             </Card>
 
-            {/* Regulares vs Emergencias */}
-            <div className="grid grid-cols-2 gap-3">
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wide">Viajes regulares</p>
-                  <p className="text-2xl font-bold text-sky-600 mt-1">{asigMes.filter(a => a.ruta_id).length}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{((asigMes.filter(a => a.ruta_id).length / Math.max(asigMes.length, 1)) * 100).toFixed(0)}% del total</p>
-                </CardContent>
-              </Card>
-              <Card className="border-0 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wide">Emergencias</p>
-                  <p className={`text-2xl font-bold mt-1 ${emergencias > 0 ? 'text-orange-600' : 'text-slate-300'}`}>{emergencias}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{((emergencias / Math.max(asigMes.length, 1)) * 100).toFixed(0)}% del total</p>
-                </CardContent>
-              </Card>
-            </div>
+            {/* Desglose por tipo */}
+            <Card className="border-0 shadow-sm">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="text-sm font-semibold text-slate-700">Desglose por tipo — mes actual</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 pb-3">
+                <div className="divide-y divide-slate-50 dark:divide-slate-800">
+                  {Object.entries(TIPO_VIAJE_CFG).map(([key, tcfg]) => {
+                    const count = asigMes.filter(a => getTipoViaje(a) === key).length;
+                    const pct   = ((count / Math.max(asigMes.length, 1)) * 100).toFixed(0);
+                    return (
+                      <div key={key} className="flex items-center gap-3 px-4 py-2.5">
+                        <Badge variant="outline" className={`text-[10px] shrink-0 ${tcfg.cls}`}>{tcfg.label}</Badge>
+                        <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div className="h-full bg-sky-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-sm font-bold text-slate-800 dark:text-slate-100 tabular-nums w-6 text-right">{count}</span>
+                        <span className="text-[10px] text-slate-400 tabular-nums w-8 text-right">{pct}%</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
           </>)}
         </div>
       )}

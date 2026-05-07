@@ -6,7 +6,7 @@ import { useTheme } from '@/components/ui-helpers/useTheme';
 import {
   LayoutDashboard, List, Fuel, BarChart3, Menu, ChevronRight,
   LogOut, Settings, ShieldCheck, Users, Bell, BookOpen, Shield,
-  Moon, Sun, WalletCards, Navigation,
+  Moon, Sun, WalletCards, Navigation, HelpCircle,
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -223,6 +223,12 @@ export default function Layout() {
               <ShieldCheck className="w-2.5 h-2.5 mr-1" />
               {rl.label}
             </Badge>
+            <Link
+              to={createPageUrl('Ayuda')}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 mb-1 transition-colors"
+            >
+              <HelpCircle className="w-3.5 h-3.5" /> Centro de ayuda
+            </Link>
             <Button
               variant="ghost" size="sm"
               className="w-full justify-start text-xs text-slate-400 hover:text-red-500 dark:hover:text-red-400 px-0 h-7"
@@ -240,6 +246,17 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      {/* Floating help button */}
+      {currentPageName !== 'Ayuda' && (
+        <Link
+          to={createPageUrl('Ayuda')}
+          title="Centro de ayuda"
+          className="fixed bottom-5 right-5 z-50 w-11 h-11 rounded-full bg-sky-600 hover:bg-sky-700 shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+        >
+          <HelpCircle className="w-5 h-5 text-white" />
+        </Link>
+      )}
     </div>
   );
 }
