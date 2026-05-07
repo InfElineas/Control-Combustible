@@ -136,35 +136,36 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
   const gastoMes     = comprasMes.reduce((s, m) => s + (m.monto  || 0), 0);
   const numCargasMes = comprasMes.length + despachosRecibidosMes.length;
 
-  // ── Odómetro: lectura más alta (= más reciente) ───────────────────────────
-  const comprasConOdo = React.useMemo(() =>
-    [...compras.filter(m => m.odometro != null)]
+  // ── Odómetro: todas las lecturas (COMPRA + DESPACHO recibidos) ───────────
+  // DESPACHO puede registrar odómetro igual que COMPRA; ignorarlos causaría
+  // que vehículos abastecidos solo por despacho no mostraran km ni consumo.
+  const abastecimientosConOdo = React.useMemo(() =>
+    [...compras, ...despachosRecibidos]
+      .filter(m => m.odometro != null)
       .sort((a, b) => (b.odometro || 0) - (a.odometro || 0)),
-  [compras]);
+  [compras, despachosRecibidos]);
 
-  const ultimoOdometro    = comprasConOdo[0]?.odometro    ?? null;
-  const ultimoConsumoReal = comprasConOdo[0]?.consumo_real ?? null;
+  const ultimoOdometro    = abastecimientosConOdo[0]?.odometro    ?? null;
+  const ultimoConsumoReal = abastecimientosConOdo[0]?.consumo_real ?? null;
 
   // ── Odómetro: últimas dos lecturas registradas (sin filtro de mes) ─────────
-  // Se usan para mostrar odo inicio/fin/km en la UI, no para calcular consumo.
-  // comprasConOdo está ordenado por odómetro DESC → [0] = última, [1] = anterior
-  const odoFin      = comprasConOdo[0]?.odometro ?? null;
-  const odoFinFecha = comprasConOdo[0]?.fecha    ?? null;
-  const odoInicio   = comprasConOdo[1]?.odometro ?? null;
+  // abastecimientosConOdo ordenado por odómetro DESC → [0] = última, [1] = anterior
+  const odoFin      = abastecimientosConOdo[0]?.odometro ?? null;
+  const odoFinFecha = abastecimientosConOdo[0]?.fecha    ?? null;
+  const odoInicio   = abastecimientosConOdo[1]?.odometro ?? null;
 
   const kmEntreOdo = odoFin != null && odoInicio != null && odoFin > odoInicio
     ? odoFin - odoInicio
     : null;
 
-  // Índice de consumo del período: promedio de consumo_real de las cargas del mes.
-  // Se usa consumo_real (ya calculado al registrar cada carga) en lugar de dividir
-  // kmEntreOdo (historial completo) entre litrosMes (solo el período), que mezcla
-  // períodos distintos y produce valores incorrectos.
+  // Índice de consumo del período: promedio de consumo_real de las cargas del mes
+  // incluyendo DESPACHO recibidos (pueden tener consumo_real si se registró odómetro).
   const indiceConsumoRealMes = React.useMemo(() => {
-    const movsCon = comprasMes.filter(m => m.consumo_real != null && m.consumo_real > 0);
+    const movsCon = [...comprasMes, ...despachosRecibidosMes]
+      .filter(m => m.consumo_real != null && m.consumo_real > 0);
     if (movsCon.length === 0) return null;
     return movsCon.reduce((s, m) => s + m.consumo_real, 0) / movsCon.length;
-  }, [comprasMes]);
+  }, [comprasMes, despachosRecibidosMes]);
 
   // ── Consumo verificado por nivel de tanque ────────────────────────────────
   // Requiere dos cargas consecutivas con nivel_tanque registrado
