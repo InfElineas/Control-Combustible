@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
   Plus, Navigation, BookOpen, BarChart3,
@@ -49,15 +50,23 @@ function esNoVehiculo(c) {
 
 function DialogNovedad({ ruta, novedad, consumidores, conductores, onClose, onSave }) {
   const vehiculos = consumidores.filter(c => c.activo && !esNoVehiculo(c));
-  const [form, setForm] = useState(() => ({
-    consumidor_id:     novedad?.consumidor_id     || ruta.consumidor_id     || '',
-    consumidor_nombre: novedad?.consumidor_nombre || ruta.consumidor_nombre || '',
-    conductor_id:      novedad?.conductor_id      || ruta.conductor_id      || '',
-    conductor_nombre:  novedad?.conductor_nombre  || ruta.conductor_nombre  || '',
-    km_reales:         novedad?.km_reales         ?? '',
-    observaciones:     novedad?.observaciones     || '',
-    estado:            novedad?.estado            || 'completada',
-  }));
+  const [form, setForm] = useState(() => {
+    const vehId = novedad?.consumidor_id || ruta.consumidor_id || '';
+    const veh   = consumidores.find(x => x.id === vehId);
+    return {
+      consumidor_id:     vehId,
+      consumidor_nombre: novedad?.consumidor_nombre || ruta.consumidor_nombre || '',
+      conductor_id:      novedad?.conductor_id      || veh?.conductor_id || ruta.conductor_id || '',
+      conductor_nombre:  novedad?.conductor_nombre  || veh?.conductor    || ruta.conductor_nombre || '',
+      ayudante_id:       novedad?.ayudante_id       || veh?.ayudante_id  || '',
+      ayudante_nombre:   novedad?.ayudante_nombre   || veh?.ayudante     || '',
+      inclConductor:     !!(novedad?.conductor_id   || veh?.conductor_id || ruta.conductor_id),
+      inclAyudante:      !!(novedad?.ayudante_id    || veh?.ayudante_id),
+      km_reales:         novedad?.km_reales         ?? '',
+      observaciones:     novedad?.observaciones     || '',
+      estado:            novedad?.estado            || 'completada',
+    };
+  });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const esSustitucion = form.consumidor_id && ruta.consumidor_id &&
@@ -70,8 +79,10 @@ function DialogNovedad({ ruta, novedad, consumidores, conductores, onClose, onSa
     onSave({
       consumidor_id:     form.estado !== 'cancelada' ? form.consumidor_id     : (ruta.consumidor_id     || null),
       consumidor_nombre: form.estado !== 'cancelada' ? form.consumidor_nombre : (ruta.consumidor_nombre || null),
-      conductor_id:      form.conductor_id     || null,
-      conductor_nombre:  form.conductor_nombre || null,
+      conductor_id:      form.inclConductor ? (form.conductor_id    || null) : null,
+      conductor_nombre:  form.inclConductor ? (form.conductor_nombre || null) : null,
+      ayudante_id:       form.inclAyudante  ? (form.ayudante_id     || null) : null,
+      ayudante_nombre:   form.inclAyudante  ? (form.ayudante_nombre || null) : null,
       km_reales:         form.km_reales !== '' ? Number(form.km_reales) : null,
       observaciones:     form.observaciones.trim() || null,
       estado:            form.estado,
@@ -127,10 +138,22 @@ function DialogNovedad({ ruta, novedad, consumidores, conductores, onClose, onSa
               <Select
                 value={form.consumidor_id || '_none'}
                 onValueChange={v => {
-                  if (v === '_none') { set('consumidor_id', ''); set('consumidor_nombre', ''); return; }
-                  const c = consumidores.find(x => x.id === v);
-                  set('consumidor_id', v);
-                  set('consumidor_nombre', c?.nombre || '');
+                  if (v === '_none') {
+                    setForm(p => ({ ...p, consumidor_id: '', consumidor_nombre: '', conductor_id: '', conductor_nombre: '', ayudante_id: '', ayudante_nombre: '', inclConductor: false, inclAyudante: false }));
+                    return;
+                  }
+                  const veh = consumidores.find(x => x.id === v);
+                  setForm(p => ({
+                    ...p,
+                    consumidor_id:     v,
+                    consumidor_nombre: veh?.nombre        || '',
+                    conductor_id:      veh?.conductor_id  || '',
+                    conductor_nombre:  veh?.conductor     || '',
+                    ayudante_id:       veh?.ayudante_id   || '',
+                    ayudante_nombre:   veh?.ayudante      || '',
+                    inclConductor:     !!veh?.conductor_id,
+                    inclAyudante:      !!veh?.ayudante_id,
+                  }));
                 }}
               >
                 <SelectTrigger className="mt-1">
@@ -158,26 +181,53 @@ function DialogNovedad({ ruta, novedad, consumidores, conductores, onClose, onSa
             </div>
           )}
 
-          {/* Conductor */}
-          <div>
-            <Label className="text-xs text-slate-500">Conductor <span className="text-slate-300">(opcional)</span></Label>
-            <Select
-              value={form.conductor_id || '_none'}
-              onValueChange={v => {
-                if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
-                const c = conductores.find(x => x.id === v);
-                set('conductor_id', v);
-                set('conductor_nombre', c?.nombre || '');
-              }}
-            >
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Sin conductor asignado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_none">Sin conductor</SelectItem>
-                {conductores.filter(c => c.activo !== false).map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Conductores del viaje */}
+          <div className="space-y-2">
+            <Label className="text-xs text-slate-500">Conductores del viaje</Label>
+            <div className="border border-slate-100 rounded-lg p-2.5 space-y-2.5 bg-slate-50/50">
+              {/* Conductor principal */}
+              <div className="flex items-center gap-2">
+                <Checkbox id="nv-incl-conductor" checked={form.inclConductor} onCheckedChange={v => set('inclConductor', v)} />
+                <Label htmlFor="nv-incl-conductor" className="text-[11px] text-slate-500 w-20 shrink-0 cursor-pointer">Conductor</Label>
+                <Select
+                  value={form.conductor_id || '_none'}
+                  onValueChange={v => {
+                    if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
+                    const c = conductores.find(x => x.id === v);
+                    set('conductor_id', v); set('conductor_nombre', c?.nombre || ''); set('inclConductor', true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Sin conductor</SelectItem>
+                    {conductores.filter(c => c.activo !== false).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Ayudante */}
+              <div className="flex items-center gap-2">
+                <Checkbox id="nv-incl-ayudante" checked={form.inclAyudante} onCheckedChange={v => set('inclAyudante', v)} />
+                <Label htmlFor="nv-incl-ayudante" className="text-[11px] text-slate-500 w-20 shrink-0 cursor-pointer">Ayudante</Label>
+                <Select
+                  value={form.ayudante_id || '_none'}
+                  onValueChange={v => {
+                    if (v === '_none') { set('ayudante_id', ''); set('ayudante_nombre', ''); return; }
+                    const c = conductores.find(x => x.id === v);
+                    set('ayudante_id', v); set('ayudante_nombre', c?.nombre || ''); set('inclAyudante', true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Sin ayudante</SelectItem>
+                    {conductores.filter(c => c.activo !== false && c.id !== form.conductor_id).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
           {/* Km + Observaciones */}
@@ -228,6 +278,8 @@ const EMPTY_ASIG = {
   descripcion_emergencia: '',
   consumidor_id: '', consumidor_nombre: '',
   conductor_id: '', conductor_nombre: '',
+  ayudante_id: '', ayudante_nombre: '',
+  inclConductor: false, inclAyudante: false,
   km_reales: '', observaciones: '', estado: 'completada',
 };
 
@@ -240,6 +292,10 @@ function DialogAsignacion({ asignacion, consumidores, conductores, onClose, onSa
     consumidor_nombre:      asignacion.consumidor_nombre || '',
     conductor_id:           asignacion.conductor_id || '',
     conductor_nombre:       asignacion.conductor_nombre || '',
+    ayudante_id:            asignacion.ayudante_id || '',
+    ayudante_nombre:        asignacion.ayudante_nombre || '',
+    inclConductor:          !!asignacion.conductor_id,
+    inclAyudante:           !!asignacion.ayudante_id,
     km_reales:              asignacion.km_reales ?? '',
     observaciones:          asignacion.observaciones || '',
     estado:                 asignacion.estado || 'completada',
@@ -258,8 +314,10 @@ function DialogAsignacion({ asignacion, consumidores, conductores, onClose, onSa
       descripcion_emergencia: form.descripcion_emergencia.trim(),
       consumidor_id:          form.consumidor_id,
       consumidor_nombre:      form.consumidor_nombre,
-      conductor_id:           form.conductor_id  || null,
-      conductor_nombre:       form.conductor_nombre || null,
+      conductor_id:           form.inclConductor ? (form.conductor_id    || null) : null,
+      conductor_nombre:       form.inclConductor ? (form.conductor_nombre || null) : null,
+      ayudante_id:            form.inclAyudante  ? (form.ayudante_id     || null) : null,
+      ayudante_nombre:        form.inclAyudante  ? (form.ayudante_nombre || null) : null,
       km_reales:              form.km_reales !== '' ? Number(form.km_reales) : null,
       observaciones:          form.observaciones.trim() || null,
       estado:                 form.estado,
@@ -323,9 +381,18 @@ function DialogAsignacion({ asignacion, consumidores, conductores, onClose, onSa
           <div>
             <Label className="text-xs text-slate-500">Vehículo *</Label>
             <Select value={form.consumidor_id} onValueChange={v => {
-              const c = consumidores.find(x => x.id === v);
-              set('consumidor_id', v);
-              set('consumidor_nombre', c?.nombre || '');
+              const veh = consumidores.find(x => x.id === v);
+              setForm(p => ({
+                ...p,
+                consumidor_id:     v,
+                consumidor_nombre: veh?.nombre       || '',
+                conductor_id:      veh?.conductor_id || '',
+                conductor_nombre:  veh?.conductor    || '',
+                ayudante_id:       veh?.ayudante_id  || '',
+                ayudante_nombre:   veh?.ayudante     || '',
+                inclConductor:     !!veh?.conductor_id,
+                inclAyudante:      !!veh?.ayudante_id,
+              }));
             }}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar vehículo..." /></SelectTrigger>
               <SelectContent>
@@ -338,22 +405,51 @@ function DialogAsignacion({ asignacion, consumidores, conductores, onClose, onSa
             </Select>
           </div>
 
-          <div>
-            <Label className="text-xs text-slate-500">Conductor <span className="text-slate-300">(opcional)</span></Label>
-            <Select value={form.conductor_id || '_none'} onValueChange={v => {
-              if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
-              const c = conductores.find(x => x.id === v);
-              set('conductor_id', v);
-              set('conductor_nombre', c?.nombre || '');
-            }}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Sin conductor asignado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_none">Sin conductor</SelectItem>
-                {conductores.filter(c => c.activo !== false).map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Conductores del viaje */}
+          <div className="space-y-2">
+            <Label className="text-xs text-slate-500">Conductores del viaje</Label>
+            <div className="border border-slate-100 rounded-lg p-2.5 space-y-2.5 bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <Checkbox id="ea-incl-conductor" checked={form.inclConductor} onCheckedChange={v => set('inclConductor', v)} />
+                <Label htmlFor="ea-incl-conductor" className="text-[11px] text-slate-500 w-20 shrink-0 cursor-pointer">Conductor</Label>
+                <Select
+                  value={form.conductor_id || '_none'}
+                  onValueChange={v => {
+                    if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
+                    const c = conductores.find(x => x.id === v);
+                    set('conductor_id', v); set('conductor_nombre', c?.nombre || ''); set('inclConductor', true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Sin conductor</SelectItem>
+                    {conductores.filter(c => c.activo !== false).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox id="ea-incl-ayudante" checked={form.inclAyudante} onCheckedChange={v => set('inclAyudante', v)} />
+                <Label htmlFor="ea-incl-ayudante" className="text-[11px] text-slate-500 w-20 shrink-0 cursor-pointer">Ayudante</Label>
+                <Select
+                  value={form.ayudante_id || '_none'}
+                  onValueChange={v => {
+                    if (v === '_none') { set('ayudante_id', ''); set('ayudante_nombre', ''); return; }
+                    const c = conductores.find(x => x.id === v);
+                    set('ayudante_id', v); set('ayudante_nombre', c?.nombre || ''); set('inclAyudante', true);
+                  }}
+                >
+                  <SelectTrigger className="h-7 text-xs flex-1"><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Sin ayudante</SelectItem>
+                    {conductores.filter(c => c.activo !== false && c.id !== form.conductor_id).map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -617,6 +713,9 @@ function RutaDiaRow({ ruta, novedad, canWrite, onRegistrar, onEditar, onEliminar
               {novedad.conductor_nombre && (
                 <span className="flex items-center gap-1"><User2 className="w-3 h-3" />{novedad.conductor_nombre}</span>
               )}
+              {novedad.ayudante_nombre && (
+                <span className="flex items-center gap-1 text-violet-500"><User2 className="w-3 h-3" />{novedad.ayudante_nombre} <span className="text-slate-300 font-normal">(ayudante)</span></span>
+              )}
               {novedad.km_reales != null && (
                 <span className="font-medium text-sky-600">
                   {Number(novedad.km_reales).toFixed(1)} km reales
@@ -677,6 +776,7 @@ function AsignacionCard({ asig, canWrite, onEdit, onDelete }) {
           <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-slate-500">
             <span className="flex items-center gap-1"><Car className="w-3 h-3" />{asig.consumidor_nombre || '—'}</span>
             {asig.conductor_nombre && <span className="flex items-center gap-1"><User2 className="w-3 h-3" />{asig.conductor_nombre}</span>}
+            {asig.ayudante_nombre  && <span className="flex items-center gap-1 text-violet-500"><User2 className="w-3 h-3" />{asig.ayudante_nombre} <span className="text-slate-400 text-[10px]">(ay.)</span></span>}
             {asig.km_reales != null && <span className="font-medium text-sky-600">{Number(asig.km_reales).toFixed(1)} km</span>}
           </div>
           {asig.observaciones && <p className="text-[11px] text-slate-400 mt-1 italic">{asig.observaciones}</p>}

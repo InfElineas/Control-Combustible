@@ -29,7 +29,9 @@ const emptyForm = {
   tipo_consumidor_id: '', tipo_consumidor_nombre: '',
   nombre: '', codigo_interno: '',
   combustible_id: '', combustible_nombre: '',
-  activo: true, responsable: '', conductor: '', funcion: '', observaciones: '',
+  activo: true, responsable: '', conductor: '', conductor_id: '',
+  ayudante: '', ayudante_id: '',
+  funcion: '', observaciones: '',
   litros_iniciales: 0,
   datos_vehiculo: {}, datos_tanque: {}, datos_equipo: {},
 };
@@ -103,6 +105,10 @@ export default function Consumidores() {
     queryKey: ['combustibles'],
     queryFn: () => base44.entities.TipoCombustible.list(),
   });
+  const { data: conductores = [] } = useQuery({
+    queryKey: ['conductores'],
+    queryFn: () => base44.entities.Conductor.list(),
+  });
 
   const [tabTipo, setTabTipo] = useState('all');
   const [filterActivo, setFilterActivo] = useState('activos');
@@ -139,6 +145,9 @@ export default function Consumidores() {
       activo: c.activo !== false,
       responsable: c.responsable || '',
       conductor: c.conductor || '',
+      conductor_id: c.conductor_id || '',
+      ayudante: c.ayudante || '',
+      ayudante_id: c.ayudante_id || '',
       funcion: c.funcion || '',
       observaciones: c.observaciones || '',
       litros_iniciales: Number.isFinite(Number(c.litros_iniciales)) ? Number(c.litros_iniciales) : 0,
@@ -319,6 +328,7 @@ export default function Consumidores() {
             tipos={tipos}
             combustibles={combustibles}
             editingTipo={editing?.tipo_consumidor_nombre}
+            conductores={conductores}
           />
           <DialogFooter className="mt-4">
             <Button variant="outline" size="sm" onClick={closeDialog}>Cancelar</Button>

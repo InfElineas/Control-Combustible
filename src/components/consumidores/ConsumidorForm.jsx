@@ -3,6 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 
 // Detecta si un tipo es "vehículo" por nombre
 const esVehiculo = nombre => nombre?.toLowerCase().includes('veh');
@@ -18,7 +19,7 @@ function Field({ label, children, required }) {
   );
 }
 
-export default function ConsumidorForm({ form, setForm, tipos, combustibles, editingTipo }) {
+export default function ConsumidorForm({ form, setForm, tipos, combustibles, editingTipo, conductores = [] }) {
   const tipo = tipos.find(t => t.id === form.tipo_consumidor_id);
   const nombreTipo = tipo?.nombre || editingTipo || '';
   const isVeh = esVehiculo(nombreTipo);
@@ -108,9 +109,57 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
       </Field>
 
       {isVeh && (
-        <Field label="Conductor">
-          <Input value={form.conductor || ''} onChange={e => set('conductor', e.target.value)} />
-        </Field>
+        <div className="border border-slate-100 rounded-xl p-3 space-y-3 bg-slate-50/30">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Conductores del vehículo</p>
+          <div className="grid grid-cols-1 gap-3">
+            <Field label="Conductor principal">
+              <Select
+                value={form.conductor_id || '_none'}
+                onValueChange={v => {
+                  if (v === '_none') { set('conductor_id', ''); set('conductor', ''); return; }
+                  const c = conductores.find(x => x.id === v);
+                  set('conductor_id', v);
+                  set('conductor', c?.nombre || '');
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Sin conductor asignado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin conductor</SelectItem>
+                  {conductores.filter(c => c.activo !== false).map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nombre}
+                      {c.licencia_categoria ? <span className="text-slate-400"> · Cat. {c.licencia_categoria}</span> : null}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {form.conductor_id && (
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {conductores.find(c => c.id === form.conductor_id)?.ci && `CI: ${conductores.find(c => c.id === form.conductor_id).ci}`}
+                </p>
+              )}
+            </Field>
+            <Field label="Ayudante">
+              <Select
+                value={form.ayudante_id || '_none'}
+                onValueChange={v => {
+                  if (v === '_none') { set('ayudante_id', ''); set('ayudante', ''); return; }
+                  const c = conductores.find(x => x.id === v);
+                  set('ayudante_id', v);
+                  set('ayudante', c?.nombre || '');
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Sin ayudante asignado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin ayudante</SelectItem>
+                  {conductores.filter(c => c.activo !== false && c.id !== form.conductor_id).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+        </div>
       )}
 
       {/* Campos específicos vehículo */}
