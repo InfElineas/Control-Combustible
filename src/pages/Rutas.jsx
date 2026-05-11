@@ -786,8 +786,19 @@ export default function Rutas() {
     onError: () => toast.error('Error al actualizar'),
   });
   const deleteRutaMut = useMutation({
-    mutationFn: id => base44.entities.Ruta.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['rutas'] }); toast.success('Ruta eliminada'); setDeleteRutaId(null); },
+    mutationFn: async (id) => {
+      // Eliminar primero las novedades/asignaciones asociadas para evitar FK orphan
+      const asociadas = asignaciones.filter(a => a.ruta_id === id);
+      await Promise.all(asociadas.map(a => base44.entities.AsignacionRuta.delete(a.id)));
+      return base44.entities.Ruta.delete(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rutas'] });
+      queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] });
+      toast.success('Ruta eliminada');
+      setDeleteRutaId(null);
+    },
+    onError: () => toast.error('Error al eliminar la ruta'),
   });
 
   // Guardar novedad (crea o actualiza la existente para ese ruta+día)
@@ -1170,22 +1181,32 @@ export default function Rutas() {
             : createRutaMut.mutate(d)}
         />
       )}
-      {deleteAsigId && (
-        <ConfirmDialog
-          title="Eliminar registro"
-          description="¿Seguro que deseas eliminar este registro?"
-          onConfirm={() => deleteAsigMut.mutate(deleteAsigId)}
-          onCancel={() => setDeleteAsigId(null)}
-        />
-      )}
-      {deleteRutaId && (
-        <ConfirmDialog
-          title="Eliminar ruta"
-          description="¿Seguro que deseas eliminar esta ruta del catálogo?"
-          onConfirm={() => deleteRutaMut.mutate(deleteRutaId)}
-          onCancel={() => setDeleteRutaId(null)}
-        />
-      )}
+      <ConfirmDialog
+        open={!!deleteAsigId}
+        onOpenChange={open => { if (!open) setDeleteAsigId(null); }}
+        title="Eliminar registro"
+        description="¿Seguro que deseas eliminar este registro de novedad o viaje extra?"
+        onConfirm={() => deleteAsigMut.mutate(deleteAsigId)}
+        destructive
+      />
+      {(() => {
+        const rutaAEliminar = rutas.find(r => r.id === deleteRutaId);
+        const novedadesAsociadas = asignaciones.filter(a => a.ruta_id === deleteRutaId).length;
+        return (
+          <ConfirmDialog
+            open={!!deleteRutaId}
+            onOpenChange={open => { if (!open) setDeleteRutaId(null); }}
+            title={`Eliminar ruta${rutaAEliminar ? ` "${rutaAEliminar.nombre}"` : ''}`}
+            description={
+              novedadesAsociadas > 0
+                ? `Esta ruta tiene ${novedadesAsociadas} registro${novedadesAsociadas !== 1 ? 's' : ''} de novedades asociados que también serán eliminados. Esta acción no se puede deshacer.`
+                : 'Se eliminará permanentemente del catálogo. Esta acción no se puede deshacer.'
+            }
+            onConfirm={() => deleteRutaMut.mutate(deleteRutaId)}
+            destructive
+          />
+        );
+      })()}
     </div>
   );
 }
