@@ -169,7 +169,18 @@ export default function Consumidores() {
     if (form.litros_iniciales === '' || Number.isNaN(Number(form.litros_iniciales)) || Number(form.litros_iniciales) < 0) {
       toast.error('Litros iniciales inválidos'); return;
     }
-    const payload = { ...form, litros_iniciales: Number(form.litros_iniciales) };
+    // Campos de conductor opcionales: se omiten del payload si están vacíos
+    // para evitar 400 hasta que se aplique la migración SQL en Supabase.
+    // SQL necesario: ALTER TABLE consumidor ADD COLUMN IF NOT EXISTS conductor_id UUID, ayudante_id UUID, ayudante TEXT;
+    const { conductor_id, ayudante_id, ayudante, ...baseForm } = form;
+    const payload = {
+      ...baseForm,
+      litros_iniciales: Number(form.litros_iniciales),
+      ...(conductor_id ? { conductor_id }           : {}),
+      ...(form.conductor ? { conductor: form.conductor } : {}),
+      ...(ayudante_id  ? { ayudante_id }            : {}),
+      ...(ayudante     ? { ayudante }                : {}),
+    };
     if (editing) updateMut.mutate({ id: editing.id, d: payload });
     else createMut.mutate(payload);
   };
