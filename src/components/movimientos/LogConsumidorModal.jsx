@@ -1,13 +1,14 @@
 import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Fuel } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Warehouse, Fuel } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 
 const TIPO_CONFIG = {
   RECARGA:  { label: 'Recarga',  icon: ArrowUpCircle,   bg: 'bg-emerald-50', text: 'text-emerald-600', badge: 'border-emerald-200 text-emerald-700' },
   COMPRA:   { label: 'Compra',   icon: ArrowDownCircle, bg: 'bg-orange-50',  text: 'text-orange-600',  badge: 'border-orange-200 text-orange-700' },
   DESPACHO: { label: 'Despacho', icon: ArrowLeftRight,  bg: 'bg-purple-50',  text: 'text-purple-600',  badge: 'border-purple-200 text-purple-700' },
+  DEPOSITO: { label: 'Depósito', icon: Warehouse,       bg: 'bg-teal-50',    text: 'text-teal-600',    badge: 'border-teal-200 text-teal-700' },
 };
 
 export default function LogConsumidorModal({ movimiento, todosMovimientos, onClose }) {
@@ -21,8 +22,8 @@ export default function LogConsumidorModal({ movimiento, todosMovimientos, onClo
       .sort((a, b) => b.fecha?.localeCompare(a.fecha));
   }, [consumidorId, todosMovimientos]);
 
-  const totalLitros = logs.filter(m => m.consumidor_id === consumidorId && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO')).reduce((s, m) => s + (m.litros || 0), 0);
-  const totalGasto = logs.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.monto || 0), 0);
+  const totalLitros = logs.filter(m => m.consumidor_id === consumidorId && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO' || m.tipo === 'DEPOSITO')).reduce((s, m) => s + (m.litros || 0), 0);
+  const totalGasto = logs.filter(m => m.tipo === 'COMPRA' || m.tipo === 'DEPOSITO').reduce((s, m) => s + (m.monto || 0), 0);
 
   return (
     <Dialog open={!!movimiento} onOpenChange={onClose}>

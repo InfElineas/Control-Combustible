@@ -31,6 +31,7 @@ const PERMISOS_TABLA = [
   { permiso: 'Ver dashboard y resúmenes',         desc: '',                                   superadmin: true,  operador: true,  auditor: true,  economico: true  },
   { permiso: 'Ver movimientos',                   desc: '',                                   superadmin: true,  operador: true,  auditor: true,  economico: true  },
   { permiso: 'Registrar compras y despachos',     desc: 'Crear nuevos movimientos',           superadmin: true,  operador: true,  auditor: false, economico: false },
+  { permiso: 'Registrar depósitos externos',      desc: 'Cupet/Refinería (iso tanque, etc.)', superadmin: true,  operador: false, auditor: false, economico: true  },
   { permiso: 'Ver y gestionar consumidores',      desc: 'Vehículos, equipos, almacenamiento', superadmin: true,  operador: true,  auditor: false, economico: false },
   { permiso: 'Ver reportes',                      desc: '',                                   superadmin: true,  operador: true,  auditor: true,  economico: true  },
   { permiso: 'Gestionar catálogo de conductores', desc: 'Crear y editar conductores',         superadmin: true,  operador: true,  auditor: false, economico: false },

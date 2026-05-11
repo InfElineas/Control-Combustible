@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Warehouse } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { AUDITORIA_ESTADO } from './auditoriaCombustible';
 
@@ -9,6 +9,7 @@ const TIPO_CONFIG = {
   RECARGA:  { label: 'Recarga',  icon: ArrowUpCircle,   bg: 'bg-emerald-50', text: 'text-emerald-600', badge: 'border-emerald-200 text-emerald-700' },
   COMPRA:   { label: 'Compra',   icon: ArrowDownCircle, bg: 'bg-orange-50',  text: 'text-orange-600',  badge: 'border-orange-200 text-orange-700' },
   DESPACHO: { label: 'Despacho', icon: ArrowLeftRight,  bg: 'bg-purple-50',  text: 'text-purple-600',  badge: 'border-purple-200 text-purple-700' },
+  DEPOSITO: { label: 'Depósito', icon: Warehouse,       bg: 'bg-teal-50',    text: 'text-teal-600',    badge: 'border-teal-200 text-teal-700' },
 };
 
 function Row({ label, value }) {
@@ -80,6 +81,15 @@ export default function MovimientoDetalle({ movimiento: m, onClose }) {
             <>
               <Row label="Tarjeta" value={m.tarjeta_alias || m.tarjeta_id} />
               <Row label="Monto recargado" value={m.monto != null ? `+${formatMonto(m.monto)}` : null} />
+            </>
+          )}
+
+          {m.tipo === 'DEPOSITO' && (
+            <>
+              <Row label="Depósito destino" value={m.consumidor_nombre} />
+              <Row label="Litros depositados" value={m.litros != null ? `${Number(m.litros).toFixed(2)} L` : null} />
+              <Row label="Monto (adquisición)" value={m.monto != null ? formatMonto(m.monto) : null} />
+              <Row label="Tarjeta de retiro" value={m.tarjeta_alias || m.tarjeta_id} />
             </>
           )}
 

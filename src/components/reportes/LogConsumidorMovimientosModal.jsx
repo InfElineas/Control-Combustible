@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { ArrowDownCircle, ArrowLeftRight, Fuel } from 'lucide-react';
+import { ArrowDownCircle, ArrowLeftRight, Warehouse, Fuel } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 
 export default function LogConsumidorMovimientosModal({ consumidor, movimientos, onClose }) {
@@ -12,8 +12,8 @@ export default function LogConsumidorMovimientosModal({ consumidor, movimientos,
       .sort((a, b) => b.fecha?.localeCompare(a.fecha));
   }, [consumidor, movimientos]);
 
-  const totalLitros = logs.filter(m => m.consumidor_id === consumidor.id && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO')).reduce((s, m) => s + (m.litros || 0), 0);
-  const totalGasto = logs.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.monto || 0), 0);
+  const totalLitros = logs.filter(m => m.consumidor_id === consumidor.id && (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO' || m.tipo === 'DEPOSITO')).reduce((s, m) => s + (m.litros || 0), 0);
+  const totalGasto = logs.filter(m => m.tipo === 'COMPRA' || m.tipo === 'DEPOSITO').reduce((s, m) => s + (m.monto || 0), 0);
   const avgConsumo = (() => {
     const vals = logs.filter(m => m.consumo_real != null).map(m => m.consumo_real);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -77,10 +77,13 @@ export default function LogConsumidorMovimientosModal({ consumidor, movimientos,
                       <td className="py-2 px-2 text-slate-600 font-medium">{m.fecha}</td>
                       <td className="py-2 px-2">
                         <div className="flex items-center gap-1">
-                          {m.tipo === 'COMPRA' ? <ArrowDownCircle className="w-3 h-3 text-orange-400" /> : <ArrowLeftRight className="w-3 h-3 text-purple-400" />}
+                          {m.tipo === 'COMPRA'   ? <ArrowDownCircle className="w-3 h-3 text-orange-400" />
+                           : m.tipo === 'DEPOSITO' ? <Warehouse className="w-3 h-3 text-teal-500" />
+                           : <ArrowLeftRight className="w-3 h-3 text-purple-400" />}
                           <Badge variant="outline" className={`text-[9px] py-0 px-1 ${
-                            m.tipo === 'COMPRA' ? 'border-orange-200 text-orange-600' :
+                            m.tipo === 'COMPRA'   ? 'border-orange-200 text-orange-600' :
                             m.tipo === 'DESPACHO' ? 'border-purple-200 text-purple-600' :
+                            m.tipo === 'DEPOSITO' ? 'border-teal-200 text-teal-600' :
                             'border-emerald-200 text-emerald-600'
                           }`}>
                             {esOrigen ? 'Origen' : m.tipo}

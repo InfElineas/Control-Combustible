@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useSearchParams } from 'react-router-dom';
-import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Filter, Plus, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { ArrowUpCircle, ArrowDownCircle, ArrowLeftRight, Warehouse, Filter, Plus, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import CombustibleBadge from '@/components/ui-helpers/CombustibleBadge';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
@@ -26,6 +26,7 @@ const TIPO_CONFIG = {
   RECARGA:  { label: 'Recarga',  icon: ArrowUpCircle,   bg: 'bg-emerald-50', text: 'text-emerald-600', badge: 'border-emerald-200 text-emerald-700' },
   COMPRA:   { label: 'Compra',   icon: ArrowDownCircle, bg: 'bg-orange-50',  text: 'text-orange-600',  badge: 'border-orange-200 text-orange-700' },
   DESPACHO: { label: 'Despacho', icon: ArrowLeftRight,  bg: 'bg-purple-50',  text: 'text-purple-600',  badge: 'border-purple-200 text-purple-700' },
+  DEPOSITO: { label: 'Depósito', icon: Warehouse,       bg: 'bg-teal-50',    text: 'text-teal-600',    badge: 'border-teal-200 text-teal-700' },
 };
 
 export default function Movimientos() {
@@ -144,7 +145,8 @@ export default function Movimientos() {
     const litros = filteredByTab.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.litros || 0), 0);
     const gasto = filteredByTab.filter(m => m.tipo === 'COMPRA').reduce((s, m) => s + (m.monto || 0), 0);
     const litrosDespacho = filteredByTab.filter(m => m.tipo === 'DESPACHO').reduce((s, m) => s + (m.litros || 0), 0);
-    return { litros, gasto, litrosDespacho };
+    const litrosDeposito = filteredByTab.filter(m => m.tipo === 'DEPOSITO').reduce((s, m) => s + (m.litros || 0), 0);
+    return { litros, gasto, litrosDespacho, litrosDeposito };
   }, [filteredByTab]);
 
   const csvColumns = [
@@ -274,6 +276,12 @@ export default function Movimientos() {
               <span className="text-xs font-bold text-purple-700">{resumen.litrosDespacho.toFixed(1)} L</span>
             </div>
           )}
+          {resumen.litrosDeposito > 0 && (
+            <div className="bg-teal-50 border border-teal-100 rounded-lg px-3 py-1.5 flex items-center gap-2">
+              <span className="text-xs text-teal-500 font-medium">Litros depositados</span>
+              <span className="text-xs font-bold text-teal-700">{resumen.litrosDeposito.toFixed(1)} L</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -368,6 +376,8 @@ export default function Movimientos() {
                       <td className="px-4 py-3 text-slate-600 text-xs">
                         {m.tipo === 'DESPACHO'
                           ? <span className="text-purple-700 font-medium">{m.consumidor_origen_nombre || m.vehiculo_origen_chapa || 'Reserva'}</span>
+                          : m.tipo === 'DEPOSITO'
+                          ? <span className="text-teal-600">{m.tarjeta_alias ? `Retiro: ${m.tarjeta_alias}` : '—'}</span>
                           : <span>{m.tarjeta_alias || m.tarjeta_id || '—'}</span>
                         }
                       </td>
