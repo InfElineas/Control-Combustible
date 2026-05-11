@@ -243,19 +243,20 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
             <Input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className="mt-1" />
           </div>
 
-          {(tipo === 'RECARGA' || tipo === 'COMPRA') && (
+          {(tipo === 'RECARGA' || tipo === 'COMPRA' || tipo === 'DEPOSITO') && (
             <div>
-              <Label className="text-xs text-slate-500">Tarjeta</Label>
+              <Label className="text-xs text-slate-500">{tipo === 'DEPOSITO' ? 'Tarjeta de retiro asociada (opcional)' : 'Tarjeta'}</Label>
               <Select value={form.tarjeta_id} onValueChange={v => set('tarjeta_id', v)}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                 <SelectContent>
                   {tarjetas.map(t => <SelectItem key={t.id} value={t.id}>{t.alias || t.id_tarjeta}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {tipo === 'DEPOSITO' && <p className="text-[10px] text-slate-400 mt-1">Tarjeta usada para retirar este combustible. Permite calcular saldo disponible.</p>}
             </div>
           )}
 
-          {(tipo === 'COMPRA' || tipo === 'DESPACHO') && (
+          {(tipo === 'COMPRA' || tipo === 'DESPACHO' || tipo === 'DEPOSITO') && (
             <>
               {tipo === 'DESPACHO' && (
                 <div>
@@ -304,14 +305,14 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
             </>
           )}
 
-          {(tipo === 'RECARGA' || tipo === 'COMPRA') && (
+          {(tipo === 'RECARGA' || tipo === 'COMPRA' || tipo === 'DEPOSITO') && (
             <div>
-              <Label className="text-xs text-slate-500">Monto</Label>
+              <Label className="text-xs text-slate-500">{tipo === 'DEPOSITO' ? 'Monto (costo adquisición, opcional)' : 'Monto'}</Label>
               <Input type="number" step="0.01" value={form.monto} onChange={e => set('monto', e.target.value)} className="mt-1" />
             </div>
           )}
 
-          {(tipo === 'COMPRA' || tipo === 'DESPACHO') && (
+          {(tipo === 'COMPRA' || tipo === 'DESPACHO' || tipo === 'DEPOSITO') && (
             <div>
               <Label className="text-xs text-slate-500">Litros</Label>
               <Input type="number" step="0.01" value={form.litros} onChange={e => set('litros', e.target.value)} className="mt-1" />

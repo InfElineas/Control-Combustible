@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertTriangle, TrendingDown, TrendingUp, Users, CalendarDays, User, ChevronDown } from 'lucide-react';
+import { AlertTriangle, TrendingDown, TrendingUp, Users, CalendarDays, User, ChevronDown, Warehouse } from 'lucide-react';
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
@@ -263,6 +263,39 @@ export default function Dashboard() {
       };
     }).filter(r => r.litrosCompras > 0 || r.litrosConsumo > 0 || r.litrosInicio > 0 || r.litrosEnTanqueEstimado > 0);
   }, [movimientos, movimientosFiltrados, mesFiltro, tipoCombustible, tarjetasById, consumidoresReservaIds, consumidores]);
+
+  // Saldo en depósitos externos (DEPOSITO - COMPRAs asociadas, histórico acumulado)
+  const saldoDepositos = useMemo(() => {
+    const deposits = movimientos.filter(m => m.tipo === 'DEPOSITO');
+    if (deposits.length === 0) return [];
+
+    const byConsumidor = {};
+    deposits.forEach(m => {
+      const key = m.consumidor_id || 'unknown';
+      if (!byConsumidor[key]) byConsumidor[key] = {
+        consumidorId: m.consumidor_id,
+        consumidorNombre: m.consumidor_nombre || 'Depósito externo',
+        tarjetaId: null,
+        tarjetaAlias: null,
+        litros: 0,
+        monto: 0,
+      };
+      byConsumidor[key].litros += m.litros || 0;
+      byConsumidor[key].monto += m.monto || 0;
+      if (!byConsumidor[key].tarjetaId && m.tarjeta_id) {
+        byConsumidor[key].tarjetaId = m.tarjeta_id;
+        byConsumidor[key].tarjetaAlias = m.tarjeta_alias;
+      }
+    });
+
+    return Object.values(byConsumidor).map(dep => {
+      const retirados = dep.tarjetaId
+        ? movimientos.filter(m => m.tipo === 'COMPRA' && m.tarjeta_id === dep.tarjetaId)
+            .reduce((s, m) => s + (m.litros || 0), 0)
+        : null;
+      return { ...dep, retirados, saldo: retirados != null ? dep.litros - retirados : null };
+    });
+  }, [movimientos]);
 
   // Resumen del mes
   const comprasMes = movimientosFiltrados.filter(m => m.tipo === 'COMPRA');
@@ -634,6 +667,54 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Saldo en depósitos externos */}
+      {saldoDepositos.length > 0 && (
+        <div>
+          <SectionTitle icon={Warehouse} title="Saldo en depósitos externos" iconColor="text-teal-500" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {saldoDepositos.map(dep => (
+              <Card key={dep.consumidorId || dep.consumidorNombre} className="border-0 shadow-sm">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                      <Warehouse className="w-4 h-4 text-teal-500 shrink-0" />
+                      {dep.consumidorNombre}
+                    </p>
+                    {dep.tarjetaAlias && (
+                      <Badge variant="outline" className="text-[10px] shrink-0">🪙 {dep.tarjetaAlias}</Badge>
+                    )}
+                  </div>
+                  <div className="text-xs space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Total depositado</span>
+                      <span className="font-medium text-slate-700">{dep.litros.toFixed(1)} L</span>
+                    </div>
+                    {dep.retirados != null && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Retirado (COMPRAs)</span>
+                        <span className="font-medium text-slate-700">{dep.retirados.toFixed(1)} L</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-100 pt-1 mt-0.5">
+                      <span className="font-semibold text-teal-700">Saldo disponible</span>
+                      <span className={`font-bold ${dep.saldo != null ? (dep.saldo < 0 ? 'text-red-600' : 'text-teal-700') : 'text-slate-600'}`}>
+                        {dep.saldo != null ? `${dep.saldo.toFixed(1)} L` : `${dep.litros.toFixed(1)} L`}
+                      </span>
+                    </div>
+                    {dep.retirados == null && (
+                      <p className="text-[10px] text-slate-400 pt-0.5">Sin tarjeta asociada — configure una al registrar el depósito para calcular saldo automáticamente.</p>
+                    )}
+                    {dep.monto > 0 && (
+                      <p className="text-[10px] text-slate-400">Costo adquisición: {formatMonto(dep.monto)}</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Dialog open={statModal.open} onOpenChange={(open) => { setStatModal(s => ({ ...s, open })); setModalGrupoIdx(0); }}>
         <DialogContent className="max-w-2xl p-0 overflow-hidden">

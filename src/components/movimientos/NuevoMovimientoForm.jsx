@@ -7,14 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { ArrowDownCircle, ArrowLeftRight, Save, Loader2, Gauge } from 'lucide-react';
+import { ArrowDownCircle, ArrowLeftRight, Warehouse, Save, Loader2, Gauge } from 'lucide-react';
 import { obtenerPrecioVigente, formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import { calcularAuditoriaCompra, obtenerCapacidadTanque, AUDITORIA_ESTADO } from './auditoriaCombustible';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 export default function NuevoMovimientoForm({ onSuccess }) {
   const queryClient = useQueryClient();
-  const { canRecargar, canComprar, canDespachar } = useUserRole();
+  const { canRecargar, canDepositar, canComprar, canDespachar } = useUserRole();
 
   const { data: tarjetas = [] } = useQuery({ queryKey: ['tarjetas'], queryFn: () => base44.entities.Tarjeta.list() });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'], queryFn: () => base44.entities.Consumidor.list() });
@@ -31,13 +31,15 @@ export default function NuevoMovimientoForm({ onSuccess }) {
     const all = [
       { value: 'COMPRA',   label: 'Compra',   Icon: ArrowDownCircle, activeClass: 'data-[state=active]:bg-orange-50 data-[state=active]:text-orange-700' },
       { value: 'DESPACHO', label: 'Despacho', Icon: ArrowLeftRight,  activeClass: 'data-[state=active]:bg-purple-50 data-[state=active]:text-purple-700' },
+      { value: 'DEPOSITO', label: 'Depósito', Icon: Warehouse,       activeClass: 'data-[state=active]:bg-teal-50 data-[state=active]:text-teal-700' },
     ];
     return all.filter(t => {
       if (t.value === 'COMPRA')   return canComprar;
       if (t.value === 'DESPACHO') return canDespachar;
+      if (t.value === 'DEPOSITO') return canDepositar;
       return false;
     });
-  }, [canComprar, canDespachar]);
+  }, [canComprar, canDespachar, canDepositar]);
 
   const [tipo, setTipo] = useState('COMPRA');
 
@@ -310,6 +312,11 @@ export default function NuevoMovimientoForm({ onSuccess }) {
           e.odometro = `Debe ser mayor al registro anterior: ${ultimoOdometro.toLocaleString()} km`;
         }
       }
+    } else if (tipo === 'DEPOSITO') {
+      if (!form.consumidor_id) e.consumidor_id = 'Seleccione el depósito destino';
+      if (!form.combustible_id) e.combustible_id = 'Seleccione combustible';
+      const litrosDeposito = parseFloat(form.litros);
+      if (!form.litros || isNaN(litrosDeposito) || !isFinite(litrosDeposito) || litrosDeposito <= 0) e.litros = 'Litros debe ser mayor a 0';
     } else if (tipo === 'DESPACHO') {
       if (!form.consumidor_origen_id) e.consumidor_origen_id = 'Seleccione origen (reserva)';
       if (!form.consumidor_id) e.consumidor_id = 'Seleccione consumidor destino';
@@ -366,6 +373,18 @@ export default function NuevoMovimientoForm({ onSuccess }) {
         if (consumoRealCalculado != null && requiereOdometro) data.consumo_real = consumoRealCalculado;
       }
       if (form.nivel_tanque) data.nivel_tanque = parseFloat(form.nivel_tanque);
+    } else if (tipo === 'DEPOSITO') {
+      data.consumidor_id = consumidor.id;
+      data.consumidor_nombre = consumidor.nombre;
+      data.combustible_id = combustible.id;
+      data.combustible_nombre = combustible.nombre;
+      data.litros = parseFloat(form.litros);
+      if (form.monto) data.monto = parseFloat(form.monto);
+      if (form.tarjeta_id && tarjeta) {
+        data.tarjeta_id = tarjeta.id;
+        data.tarjeta_alias = tarjeta.alias || tarjeta.id_tarjeta;
+      }
+      if (form.referencia) data.referencia = form.referencia;
     } else if (tipo === 'DESPACHO') {
       data.consumidor_origen_id = consumidorOrigen.id;
       data.consumidor_origen_nombre = consumidorOrigen.nombre;
@@ -593,6 +612,72 @@ export default function NuevoMovimientoForm({ onSuccess }) {
           </>
         )}
 
+        {/* DEPOSITO */}
+        {tipo === 'DEPOSITO' && (
+          <>
+            <div>
+              <Label className="text-xs text-slate-500">Tipo de consumidor</Label>
+              <Select value={filtroTipoConsumidor} onValueChange={setFiltroTipoConsumidor}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Filtrar tipo" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {tiposConsumidor.filter(t => t.activo !== false).map(t => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Destino del depósito (Cupet / Refinería)</Label>
+              <Select value={form.consumidor_id} onValueChange={v => set('consumidor_id', v)}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar destino" /></SelectTrigger>
+                <SelectContent>
+                  {consumidoresFiltradosPorTipo.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}{c.tipo_consumidor_nombre ? ` (${c.tipo_consumidor_nombre})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.consumidor_id && <p className="text-xs text-red-500 mt-1">{errors.consumidor_id}</p>}
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Combustible</Label>
+              <Select value={form.combustible_id} onValueChange={v => set('combustible_id', v)}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar combustible" /></SelectTrigger>
+                <SelectContent>
+                  {combustiblesActivos.map(c => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {errors.combustible_id && <p className="text-xs text-red-500 mt-1">{errors.combustible_id}</p>}
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Litros depositados</Label>
+              <Input type="number" step="0.01" min="0.01" value={form.litros} onChange={e => set('litros', e.target.value)} placeholder="0.00" className="mt-1" />
+              {errors.litros && <p className="text-xs text-red-500 mt-1">{errors.litros}</p>}
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Monto (opcional)</Label>
+              <Input type="number" step="0.01" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="Costo de adquisición" className="mt-1" />
+              <p className="text-[11px] text-slate-400 mt-1">Costo del iso tanque, factura de compra, etc.</p>
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Tarjeta de retiro asociada (opcional)</Label>
+              <Select value={form.tarjeta_id} onValueChange={v => set('tarjeta_id', v)}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar tarjeta Cupet" /></SelectTrigger>
+                <SelectContent>
+                  {tarjetasActivas.map(t => (
+                    <SelectItem key={t.id} value={t.id}>{t.alias || t.id_tarjeta} ({t.moneda})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-slate-400 mt-1">Tarjeta usada para retirar este combustible. Permite calcular saldo disponible automáticamente.</p>
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Referencia (opcional)</Label>
+              <Input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="Nº iso tanque, factura, lote..." className="mt-1" />
+            </div>
+          </>
+        )}
+
         {/* DESPACHO */}
         {tipo === 'DESPACHO' && (
           <>
@@ -739,11 +824,13 @@ export default function NuevoMovimientoForm({ onSuccess }) {
             ? 'bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700'
             : tipo === 'COMPRA'
             ? 'bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700'
+            : tipo === 'DEPOSITO'
+            ? 'bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700'
             : 'bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-600 hover:to-violet-700'
         }`}
       >
         {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}
-        Guardar {tipo === 'RECARGA' ? 'Recarga' : tipo === 'COMPRA' ? 'Compra' : 'Despacho'}
+        Guardar {tipo === 'RECARGA' ? 'Recarga' : tipo === 'COMPRA' ? 'Compra' : tipo === 'DEPOSITO' ? 'Depósito' : 'Despacho'}
       </Button>
     </div>
   );
