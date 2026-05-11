@@ -165,7 +165,7 @@ export default function Consumidores() {
     const tipoNombre = (form.tipo_consumidor_nombre || '').toLowerCase();
     const esVeh = tipoNombre.includes('veh');
     if (esVeh && !form.codigo_interno?.trim()) { toast.error('Código interno / Chapa es requerido para vehículos'); return; }
-    if (esVeh && !form.responsable?.trim()) { toast.error('Responsable es requerido para vehículos'); return; }
+    if (esVeh && !form.conductor_id) { toast.error('Conductor principal es requerido para vehículos'); return; }
     if (form.litros_iniciales === '' || Number.isNaN(Number(form.litros_iniciales)) || Number(form.litros_iniciales) < 0) {
       toast.error('Litros iniciales inválidos'); return;
     }
