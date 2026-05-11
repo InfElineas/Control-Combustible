@@ -78,34 +78,45 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
         </Select>
       </Field>
 
-      {/* Para vehículos: conductor del catálogo reemplaza el campo Responsable */}
-      {isVeh ? (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Conductor principal" required>
-              <Select
-                value={form.conductor_id || '_none'}
-                onValueChange={v => {
-                  if (v === '_none') { set('conductor_id', ''); set('conductor', ''); set('responsable', ''); return; }
-                  const c = conductores.find(x => x.id === v);
-                  set('conductor_id', v);
-                  set('conductor', c?.nombre || '');
-                  set('responsable', c?.nombre || '');
-                }}
-              >
-                <SelectTrigger><SelectValue placeholder="Seleccionar conductor..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="_none">Sin conductor</SelectItem>
-                  {conductores.filter(c => c.activo !== false).map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Función">
-              <Input value={form.funcion || ''} onChange={e => set('funcion', e.target.value)} placeholder="Transporte, Generación..." />
-            </Field>
-          </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Responsable" required={isVeh}>
+          <Input
+            list="responsable-suggestions"
+            value={form.responsable || ''}
+            onChange={e => set('responsable', e.target.value)}
+            placeholder={isVeh ? 'Nombre o Mixto/Varios' : ''}
+          />
+          <datalist id="responsable-suggestions">
+            <option value="Mixto / Varios" />
+            <option value="Por asignar" />
+          </datalist>
+        </Field>
+        <Field label="Función">
+          <Input value={form.funcion || ''} onChange={e => set('funcion', e.target.value)} placeholder="Transporte, Generación..." />
+        </Field>
+      </div>
+
+      {isVeh && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Conductor principal">
+            <Select
+              value={form.conductor_id || '_none'}
+              onValueChange={v => {
+                if (v === '_none') { set('conductor_id', ''); set('conductor', ''); return; }
+                const c = conductores.find(x => x.id === v);
+                set('conductor_id', v);
+                set('conductor', c?.nombre || '');
+              }}
+            >
+              <SelectTrigger><SelectValue placeholder="Sin conductor" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">Sin conductor</SelectItem>
+                {conductores.filter(c => c.activo !== false).map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="Ayudante">
             <Select
               value={form.ayudante_id || '_none'}
@@ -116,7 +127,7 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
                 set('ayudante', c?.nombre || '');
               }}
             >
-              <SelectTrigger><SelectValue placeholder="Sin ayudante asignado" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Sin ayudante" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none">Sin ayudante</SelectItem>
                 {conductores.filter(c => c.activo !== false && c.id !== form.conductor_id).map(c => (
@@ -124,24 +135,6 @@ export default function ConsumidorForm({ form, setForm, tipos, combustibles, edi
                 ))}
               </SelectContent>
             </Select>
-          </Field>
-        </>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Responsable">
-            <Input
-              list="responsable-suggestions"
-              value={form.responsable || ''}
-              onChange={e => set('responsable', e.target.value)}
-              placeholder="Nombre o Mixto/Varios"
-            />
-            <datalist id="responsable-suggestions">
-              <option value="Mixto / Varios" />
-              <option value="Por asignar" />
-            </datalist>
-          </Field>
-          <Field label="Función">
-            <Input value={form.funcion || ''} onChange={e => set('funcion', e.target.value)} placeholder="Transporte, Generación..." />
           </Field>
         </div>
       )}
