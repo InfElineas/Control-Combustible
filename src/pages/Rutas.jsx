@@ -12,8 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   Plus, Navigation, BookOpen, BarChart3,
-  Pencil, Trash2, Car, User2,
-  CheckCircle2, Clock, XCircle,
+  Pencil, Trash2, Car, User2, ArrowRight, AlertTriangle,
+  CheckCircle2, Clock, XCircle, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useUserRole } from '@/components/ui-helpers/useUserRole';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
@@ -27,10 +27,10 @@ const ESTADO_CFG = {
 };
 
 const TIPO_VIAJE_CFG = {
-  regular:          { label: 'Regular',          cls: 'bg-sky-50 text-sky-700 border-sky-200'         },
+  regular:          { label: 'Regular',          cls: 'bg-sky-50 text-sky-700 border-sky-200'          },
   carga_mercancias: { label: 'Carga mercancías', cls: 'bg-violet-50 text-violet-700 border-violet-200' },
-  mensajeria:       { label: 'Mensajería',        cls: 'bg-amber-50 text-amber-700 border-amber-200'   },
-  viaje_extra:      { label: 'Viaje extra',       cls: 'bg-orange-50 text-orange-700 border-orange-200'},
+  mensajeria:       { label: 'Mensajería',       cls: 'bg-amber-50 text-amber-700 border-amber-200'    },
+  viaje_extra:      { label: 'Viaje extra',      cls: 'bg-orange-50 text-orange-700 border-orange-200' },
 };
 
 function getTipoViaje(asig) {
@@ -39,59 +39,42 @@ function getTipoViaje(asig) {
 
 const FRECUENCIA_OPTS = ['Diario', 'Según Planificación', 'Semanal', 'Mensual'];
 
-// ── Diálogo: registrar / editar asignación ───────────────────────────────────
+function esNoVehiculo(c) {
+  const n = (c.tipo_consumidor_nombre || '').toLowerCase();
+  return n.includes('tanque') || n.includes('reserva') || n.includes('almac') ||
+         n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
+}
 
-const EMPTY_ASIG = {
-  fecha: hoy(), tipo_viaje: 'regular',
-  ruta_id: '', descripcion_emergencia: '',
-  consumidor_id: '', consumidor_nombre: '',
-  conductor_id: '', conductor_nombre: '',
-  km_reales: '', observaciones: '', estado: 'completada',
-};
+// ── Diálogo: novedad de una ruta regular (sustitución / cancelación / incidencia) ──
 
-function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClose, onSave }) {
-  const [form, setForm] = useState(() => asignacion ? {
-    fecha:                   asignacion.fecha || hoy(),
-    tipo_viaje:              getTipoViaje(asignacion),
-    ruta_id:                 asignacion.ruta_id || '',
-    descripcion_emergencia:  asignacion.descripcion_emergencia || '',
-    consumidor_id:           asignacion.consumidor_id || '',
-    consumidor_nombre:       asignacion.consumidor_nombre || '',
-    conductor_id:            asignacion.conductor_id || '',
-    conductor_nombre:        asignacion.conductor_nombre || '',
-    km_reales:               asignacion.km_reales ?? '',
-    observaciones:           asignacion.observaciones || '',
-    estado:                  asignacion.estado || 'completada',
-  } : EMPTY_ASIG);
-
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const rutasRegulares = rutas.filter(r => r.activa);
-  const esNoVehiculo = (c) => {
-    const n = (c.tipo_consumidor_nombre || '').toLowerCase();
-    return n.includes('tanque') || n.includes('reserva') || n.includes('almac') ||
-           n.includes('equipo') || n.includes('planta') || n.includes('generador') || n.includes('grupo');
-  };
+function DialogNovedad({ ruta, novedad, consumidores, conductores, onClose, onSave }) {
   const vehiculos = consumidores.filter(c => c.activo && !esNoVehiculo(c));
-  const rutaSel = rutas.find(r => r.id === form.ruta_id);
+  const [form, setForm] = useState(() => ({
+    consumidor_id:     novedad?.consumidor_id     || ruta.consumidor_id     || '',
+    consumidor_nombre: novedad?.consumidor_nombre || ruta.consumidor_nombre || '',
+    conductor_id:      novedad?.conductor_id      || ruta.conductor_id      || '',
+    conductor_nombre:  novedad?.conductor_nombre  || ruta.conductor_nombre  || '',
+    km_reales:         novedad?.km_reales         ?? '',
+    observaciones:     novedad?.observaciones     || '',
+    estado:            novedad?.estado            || 'completada',
+  }));
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
-  const esRegular = form.tipo_viaje === 'regular';
+  const esSustitucion = form.consumidor_id && ruta.consumidor_id &&
+                        form.consumidor_id !== ruta.consumidor_id;
 
   const handleSave = () => {
-    if (!form.consumidor_id)                                { toast.error('Selecciona un vehículo'); return; }
-    if (esRegular && !form.ruta_id)                         { toast.error('Selecciona una ruta del catálogo'); return; }
-    if (!esRegular && !form.descripcion_emergencia.trim())  { toast.error('Describe el destino o motivo'); return; }
+    if (form.estado !== 'cancelada' && !form.consumidor_id) {
+      toast.error('Selecciona un vehículo'); return;
+    }
     onSave({
-      fecha:                   form.fecha,
-      tipo_viaje:              form.tipo_viaje,
-      ruta_id:                 esRegular ? form.ruta_id : null,
-      descripcion_emergencia:  !esRegular ? form.descripcion_emergencia.trim() : null,
-      consumidor_id:           form.consumidor_id,
-      consumidor_nombre:       form.consumidor_nombre,
-      conductor_id:            form.conductor_id || null,
-      conductor_nombre:        form.conductor_nombre || null,
-      km_reales:               form.km_reales !== '' ? Number(form.km_reales) : null,
-      observaciones:           form.observaciones.trim() || null,
-      estado:                  form.estado,
+      consumidor_id:     form.estado !== 'cancelada' ? form.consumidor_id     : (ruta.consumidor_id     || null),
+      consumidor_nombre: form.estado !== 'cancelada' ? form.consumidor_nombre : (ruta.consumidor_nombre || null),
+      conductor_id:      form.conductor_id     || null,
+      conductor_nombre:  form.conductor_nombre || null,
+      km_reales:         form.km_reales !== '' ? Number(form.km_reales) : null,
+      observaciones:     form.observaciones.trim() || null,
+      estado:            form.estado,
     });
   };
 
@@ -101,107 +84,92 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <Navigation className="w-4 h-4 text-sky-500" />
-            {asignacion ? 'Editar viaje' : 'Registrar viaje'}
+            Novedad — {ruta.nombre}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 pt-1">
-          {/* Fecha + Estado */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs text-slate-500">Fecha</Label>
-              <Input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className="mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Estado</Label>
-              <Select value={form.estado} onValueChange={v => set('estado', v)}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(ESTADO_CFG).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>{v.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {/* Info de la ruta */}
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg px-3 py-2 text-xs text-slate-500 space-y-0.5">
+            {(ruta.punto_inicio || ruta.punto_fin) && (
+              <p className="font-medium text-slate-600 dark:text-slate-300">
+                {[ruta.punto_inicio, ruta.punto_fin].filter(Boolean).join(' → ')}
+              </p>
+            )}
+            <div className="flex gap-3 flex-wrap">
+              {ruta.distancia_km  && <span className="text-sky-600 font-medium">{ruta.distancia_km} km ref.</span>}
+              {ruta.frecuencia    && <span>{ruta.frecuencia}</span>}
+              {ruta.municipio     && <span>{ruta.municipio}</span>}
             </div>
           </div>
 
-          {/* Tipo de viaje */}
+          {/* Estado */}
           <div>
-            <Label className="text-xs text-slate-500">Tipo de viaje *</Label>
-            <Select value={form.tipo_viaje} onValueChange={v => set('tipo_viaje', v)}>
+            <Label className="text-xs text-slate-500">Estado de la ruta hoy *</Label>
+            <Select value={form.estado} onValueChange={v => set('estado', v)}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.entries(TIPO_VIAJE_CFG).map(([k, v]) => (
+                {Object.entries(ESTADO_CFG).map(([k, v]) => (
                   <SelectItem key={k} value={k}>{v.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
-          {/* Ruta del catálogo (solo si es regular) */}
-          {esRegular ? (
+          {/* Vehículo (solo si no cancelada) */}
+          {form.estado !== 'cancelada' && (
             <div>
-              <Label className="text-xs text-slate-500">Ruta *</Label>
-              <Select value={form.ruta_id} onValueChange={v => set('ruta_id', v)}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar ruta..." /></SelectTrigger>
+              <Label className="text-xs text-slate-500">Vehículo del día</Label>
+              {ruta.consumidor_id && (
+                <p className="text-[10px] text-slate-400 mt-0.5 mb-1">
+                  Habitual: <span className="font-medium">{ruta.consumidor_nombre || ruta.consumidor_id}</span>
+                </p>
+              )}
+              <Select
+                value={form.consumidor_id || '_none'}
+                onValueChange={v => {
+                  if (v === '_none') { set('consumidor_id', ''); set('consumidor_nombre', ''); return; }
+                  const c = consumidores.find(x => x.id === v);
+                  set('consumidor_id', v);
+                  set('consumidor_nombre', c?.nombre || '');
+                }}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder={ruta.consumidor_id ? 'Mismo que habitual...' : 'Seleccionar vehículo...'} />
+                </SelectTrigger>
                 <SelectContent>
-                  {rutasRegulares.map(r => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.nombre}{r.distancia_km ? ` · ${r.distancia_km} km` : ''}
+                  {ruta.consumidor_id && (
+                    <SelectItem value={ruta.consumidor_id}>
+                      ✓ {ruta.consumidor_nombre || ruta.consumidor_id} (habitual)
+                    </SelectItem>
+                  )}
+                  {vehiculos.filter(c => c.id !== ruta.consumidor_id).map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {rutaSel && (
-                <p className="text-[11px] text-slate-400 mt-1">
-                  {[rutaSel.punto_inicio, rutaSel.punto_fin].filter(Boolean).join(' → ')}
-                  {rutaSel.municipio ? ` · ${rutaSel.municipio}` : ''}
-                </p>
+              {esSustitucion && (
+                <div className="mt-1.5 flex items-center gap-1.5 text-amber-700 text-xs bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 rounded-lg px-2 py-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                  Sustitución: {ruta.consumidor_nombre} → {form.consumidor_nombre}
+                </div>
               )}
             </div>
-          ) : (
-            <div>
-              <Label className="text-xs text-slate-500">Destino / Motivo *</Label>
-              <Input
-                value={form.descripcion_emergencia}
-                onChange={e => set('descripcion_emergencia', e.target.value)}
-                placeholder={
-                  form.tipo_viaje === 'carga_mercancias' ? 'Ej: Entrega mercancía almacén norte' :
-                  form.tipo_viaje === 'mensajeria'       ? 'Ej: Documentos sede central' :
-                  'Ej: Traslado imprevisto'
-                }
-                className="mt-1"
-              />
-            </div>
           )}
-
-          {/* Vehículo */}
-          <div>
-            <Label className="text-xs text-slate-500">Vehículo *</Label>
-            <Select value={form.consumidor_id} onValueChange={v => {
-              const c = consumidores.find(x => x.id === v);
-              set('consumidor_id', v);
-              set('consumidor_nombre', c?.nombre || '');
-            }}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar vehículo..." /></SelectTrigger>
-              <SelectContent>
-                {vehiculos.map(c => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
 
           {/* Conductor */}
           <div>
             <Label className="text-xs text-slate-500">Conductor <span className="text-slate-300">(opcional)</span></Label>
-            <Select value={form.conductor_id || '_none'} onValueChange={v => {
-              if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
-              const c = conductores.find(x => x.id === v);
-              set('conductor_id', v);
-              set('conductor_nombre', c?.nombre || '');
-            }}>
+            <Select
+              value={form.conductor_id || '_none'}
+              onValueChange={v => {
+                if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
+                const c = conductores.find(x => x.id === v);
+                set('conductor_id', v);
+                set('conductor_nombre', c?.nombre || '');
+              }}
+            >
               <SelectTrigger className="mt-1"><SelectValue placeholder="Sin conductor asignado" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="_none">Sin conductor</SelectItem>
@@ -220,12 +188,184 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
                 type="number" step="0.1" min="0"
                 value={form.km_reales}
                 onChange={e => set('km_reales', e.target.value)}
+                placeholder={ruta.distancia_km ? `Ref: ${ruta.distancia_km}` : 'Ej: 17.5'}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">
+                {form.estado === 'cancelada' || esSustitucion ? 'Motivo' : 'Observaciones'}
+              </Label>
+              <Input
+                value={form.observaciones}
+                onChange={e => set('observaciones', e.target.value)}
+                placeholder={
+                  form.estado === 'cancelada' ? 'Ej: Falla mecánica'
+                  : esSustitucion ? 'Ej: Vehículo en taller'
+                  : 'Notas...'
+                }
+                className="mt-1"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-2 justify-end pt-1">
+            <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
+            <Button size="sm" className="bg-sky-600 hover:bg-sky-700" onClick={handleSave}>
+              {novedad ? 'Guardar cambios' : 'Registrar novedad'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Diálogo: viaje extra (no regular) ───────────────────────────────────────
+
+const EMPTY_ASIG = {
+  fecha: hoy(), tipo_viaje: 'viaje_extra',
+  descripcion_emergencia: '',
+  consumidor_id: '', consumidor_nombre: '',
+  conductor_id: '', conductor_nombre: '',
+  km_reales: '', observaciones: '', estado: 'completada',
+};
+
+function DialogAsignacion({ asignacion, consumidores, conductores, onClose, onSave }) {
+  const [form, setForm] = useState(() => asignacion ? {
+    fecha:                  asignacion.fecha || hoy(),
+    tipo_viaje:             getTipoViaje(asignacion) === 'regular' ? 'viaje_extra' : getTipoViaje(asignacion),
+    descripcion_emergencia: asignacion.descripcion_emergencia || '',
+    consumidor_id:          asignacion.consumidor_id || '',
+    consumidor_nombre:      asignacion.consumidor_nombre || '',
+    conductor_id:           asignacion.conductor_id || '',
+    conductor_nombre:       asignacion.conductor_nombre || '',
+    km_reales:              asignacion.km_reales ?? '',
+    observaciones:          asignacion.observaciones || '',
+    estado:                 asignacion.estado || 'completada',
+  } : EMPTY_ASIG);
+
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const vehiculos = consumidores.filter(c => c.activo && !esNoVehiculo(c));
+
+  const handleSave = () => {
+    if (!form.consumidor_id)                         { toast.error('Selecciona un vehículo'); return; }
+    if (!form.descripcion_emergencia.trim())          { toast.error('Describe el destino o motivo'); return; }
+    onSave({
+      fecha:                  form.fecha,
+      tipo_viaje:             form.tipo_viaje,
+      ruta_id:                null,
+      descripcion_emergencia: form.descripcion_emergencia.trim(),
+      consumidor_id:          form.consumidor_id,
+      consumidor_nombre:      form.consumidor_nombre,
+      conductor_id:           form.conductor_id  || null,
+      conductor_nombre:       form.conductor_nombre || null,
+      km_reales:              form.km_reales !== '' ? Number(form.km_reales) : null,
+      observaciones:          form.observaciones.trim() || null,
+      estado:                 form.estado,
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Navigation className="w-4 h-4 text-orange-500" />
+            {asignacion ? 'Editar viaje extra' : 'Registrar viaje extra'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs text-slate-500">Fecha</Label>
+              <Input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Estado</Label>
+              <Select value={form.estado} onValueChange={v => set('estado', v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ESTADO_CFG).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs text-slate-500">Tipo *</Label>
+            <Select value={form.tipo_viaje} onValueChange={v => set('tipo_viaje', v)}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(TIPO_VIAJE_CFG).filter(([k]) => k !== 'regular').map(([k, v]) => (
+                  <SelectItem key={k} value={k}>{v.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label className="text-xs text-slate-500">Destino / Motivo *</Label>
+            <Input
+              value={form.descripcion_emergencia}
+              onChange={e => set('descripcion_emergencia', e.target.value)}
+              placeholder={
+                form.tipo_viaje === 'carga_mercancias' ? 'Ej: Entrega mercancía almacén norte' :
+                form.tipo_viaje === 'mensajeria'       ? 'Ej: Documentos sede central' :
+                'Ej: Traslado imprevisto'
+              }
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-slate-500">Vehículo *</Label>
+            <Select value={form.consumidor_id} onValueChange={v => {
+              const c = consumidores.find(x => x.id === v);
+              set('consumidor_id', v);
+              set('consumidor_nombre', c?.nombre || '');
+            }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Seleccionar vehículo..." /></SelectTrigger>
+              <SelectContent>
+                {vehiculos.map(c => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div>
+            <Label className="text-xs text-slate-500">Conductor <span className="text-slate-300">(opcional)</span></Label>
+            <Select value={form.conductor_id || '_none'} onValueChange={v => {
+              if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
+              const c = conductores.find(x => x.id === v);
+              set('conductor_id', v);
+              set('conductor_nombre', c?.nombre || '');
+            }}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Sin conductor asignado" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">Sin conductor</SelectItem>
+                {conductores.filter(c => c.activo !== false).map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs text-slate-500">Km reales <span className="text-slate-300">(opcional)</span></Label>
+              <Input
+                type="number" step="0.1" min="0"
+                value={form.km_reales}
+                onChange={e => set('km_reales', e.target.value)}
                 placeholder="Ej: 17.5"
                 className="mt-1"
               />
-              {!form.esEmergencia && rutaSel?.distancia_km && (
-                <p className="text-[10px] text-slate-400 mt-0.5">Ref: {rutaSel.distancia_km} km</p>
-              )}
             </div>
             <div>
               <Label className="text-xs text-slate-500">Observaciones</Label>
@@ -240,8 +380,8 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
 
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
-            <Button size="sm" className="bg-sky-600 hover:bg-sky-700" onClick={handleSave}>
-              {asignacion ? 'Guardar cambios' : 'Registrar viaje'}
+            <Button size="sm" className="bg-orange-600 hover:bg-orange-700" onClick={handleSave}>
+              {asignacion ? 'Guardar cambios' : 'Registrar viaje extra'}
             </Button>
           </div>
         </div>
@@ -253,21 +393,27 @@ function DialogAsignacion({ asignacion, rutas, consumidores, conductores, onClos
 // ── Diálogo: crear / editar ruta del catálogo ────────────────────────────────
 
 const EMPTY_RUTA = {
-  nombre: '',
-  punto_inicio: '', punto_fin: '', municipio: '',
+  nombre: '', punto_inicio: '', punto_fin: '', municipio: '',
   distancia_km: '', tiempo_estimado: '', frecuencia: 'Diario', activa: true,
+  consumidor_id: '', consumidor_nombre: '',
+  conductor_id: '', conductor_nombre: '',
 };
 
-function DialogRuta({ ruta, onClose, onSave }) {
+function DialogRuta({ ruta, consumidores, conductores, onClose, onSave }) {
+  const vehiculos = consumidores.filter(c => c.activo && !esNoVehiculo(c));
   const [form, setForm] = useState(() => ruta ? {
-    nombre:           ruta.nombre || '',
-    punto_inicio:     ruta.punto_inicio || '',
-    punto_fin:        ruta.punto_fin || '',
-    municipio:        ruta.municipio || '',
-    distancia_km:     ruta.distancia_km ?? '',
-    tiempo_estimado:  ruta.tiempo_estimado || '',
-    frecuencia:       ruta.frecuencia || 'Diario',
-    activa:           ruta.activa ?? true,
+    nombre:            ruta.nombre           || '',
+    punto_inicio:      ruta.punto_inicio     || '',
+    punto_fin:         ruta.punto_fin        || '',
+    municipio:         ruta.municipio        || '',
+    distancia_km:      ruta.distancia_km     ?? '',
+    tiempo_estimado:   ruta.tiempo_estimado  || '',
+    frecuencia:        ruta.frecuencia       || 'Diario',
+    activa:            ruta.activa           ?? true,
+    consumidor_id:     ruta.consumidor_id    || '',
+    consumidor_nombre: ruta.consumidor_nombre || '',
+    conductor_id:      ruta.conductor_id     || '',
+    conductor_nombre:  ruta.conductor_nombre  || '',
   } : EMPTY_RUTA);
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -294,16 +440,16 @@ function DialogRuta({ ruta, onClose, onSave }) {
               </Select>
             </div>
             <div>
+              <Label className="text-xs text-slate-500">Municipio</Label>
+              <Input value={form.municipio} onChange={e => set('municipio', e.target.value)} placeholder="Arroyo Naranjo" className="mt-1" />
+            </div>
+            <div>
               <Label className="text-xs text-slate-500">Punto de inicio</Label>
               <Input value={form.punto_inicio} onChange={e => set('punto_inicio', e.target.value)} placeholder="Cerro" className="mt-1" />
             </div>
             <div>
               <Label className="text-xs text-slate-500">Punto de fin</Label>
               <Input value={form.punto_fin} onChange={e => set('punto_fin', e.target.value)} placeholder="Polígono" className="mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs text-slate-500">Municipio</Label>
-              <Input value={form.municipio} onChange={e => set('municipio', e.target.value)} placeholder="Arroyo Naranjo" className="mt-1" />
             </div>
             <div>
               <Label className="text-xs text-slate-500">Distancia (km)</Label>
@@ -313,16 +459,73 @@ function DialogRuta({ ruta, onClose, onSave }) {
               <Label className="text-xs text-slate-500">Tiempo estimado</Label>
               <Input value={form.tiempo_estimado} onChange={e => set('tiempo_estimado', e.target.value)} placeholder="25 min" className="mt-1" />
             </div>
-            <div className="col-span-2 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2">
-              <Label className="text-sm">Ruta activa</Label>
-              <Switch checked={form.activa} onCheckedChange={v => set('activa', v)} />
+          </div>
+
+          {/* Asignación habitual */}
+          <div className="border-t border-slate-100 dark:border-slate-700 pt-3 space-y-3">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Asignación habitual</p>
+            <div>
+              <Label className="text-xs text-slate-500">Vehículo habitual</Label>
+              <Select
+                value={form.consumidor_id || '_none'}
+                onValueChange={v => {
+                  if (v === '_none') { set('consumidor_id', ''); set('consumidor_nombre', ''); return; }
+                  const c = consumidores.find(x => x.id === v);
+                  set('consumidor_id', v);
+                  set('consumidor_nombre', c?.nombre || '');
+                }}
+              >
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Sin vehículo habitual" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin vehículo habitual</SelectItem>
+                  {vehiculos.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nombre}{c.codigo_interno ? ` · ${c.codigo_interno}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Conductor habitual <span className="text-slate-300">(opcional)</span></Label>
+              <Select
+                value={form.conductor_id || '_none'}
+                onValueChange={v => {
+                  if (v === '_none') { set('conductor_id', ''); set('conductor_nombre', ''); return; }
+                  const c = conductores.find(x => x.id === v);
+                  set('conductor_id', v);
+                  set('conductor_nombre', c?.nombre || '');
+                }}
+              >
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Sin conductor habitual" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin conductor</SelectItem>
+                  {conductores.filter(c => c.activo !== false).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
+
+          <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2">
+            <Label className="text-sm">Ruta activa</Label>
+            <Switch checked={form.activa} onCheckedChange={v => set('activa', v)} />
+          </div>
+
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="outline" size="sm" onClick={onClose}>Cancelar</Button>
             <Button
               size="sm" className="bg-sky-600 hover:bg-sky-700"
-              onClick={() => { if (!form.nombre.trim()) { toast.error('El nombre es requerido'); return; } onSave({ ...form, distancia_km: form.distancia_km !== '' ? Number(form.distancia_km) : null }); }}
+              onClick={() => {
+                if (!form.nombre.trim()) { toast.error('El nombre es requerido'); return; }
+                onSave({
+                  ...form,
+                  distancia_km:  form.distancia_km !== '' ? Number(form.distancia_km) : null,
+                  consumidor_id: form.consumidor_id || null,
+                  conductor_id:  form.conductor_id  || null,
+                });
+              }}
             >
               {ruta ? 'Guardar' : 'Crear ruta'}
             </Button>
@@ -333,35 +536,148 @@ function DialogRuta({ ruta, onClose, onSave }) {
   );
 }
 
-// ── Tarjeta de asignación ────────────────────────────────────────────────────
+// ── Fila de ruta en vista diaria ─────────────────────────────────────────────
 
-function AsignacionCard({ asig, ruta, canWrite, onEdit, onDelete }) {
-  const cfg = ESTADO_CFG[asig.estado] ?? ESTADO_CFG.completada;
-  const { Icon } = cfg;
-  const tipo = getTipoViaje(asig);
-  const tipoCfg = TIPO_VIAJE_CFG[tipo] ?? TIPO_VIAJE_CFG.viaje_extra;
+function RutaDiaRow({ ruta, novedad, canWrite, onRegistrar, onEditar, onEliminar }) {
+  const esSustitucion = novedad && ruta.consumidor_id && novedad.consumidor_id &&
+                        novedad.consumidor_id !== ruta.consumidor_id;
+  const esCancelada   = novedad?.estado === 'cancelada';
+  const tieneNovedad  = !!novedad;
+
+  let wrapCls = 'border-slate-100 dark:border-slate-700 hover:bg-slate-50/40 dark:hover:bg-slate-800/40';
+  if (esCancelada)        wrapCls = 'border-red-100 dark:border-red-900/40 bg-red-50/20 dark:bg-red-900/10';
+  else if (esSustitucion) wrapCls = 'border-amber-100 dark:border-amber-900/40 bg-amber-50/20 dark:bg-amber-900/10';
+
   return (
-    <div className="border border-slate-100 rounded-xl p-3 hover:bg-slate-50/40 dark:border-slate-700 dark:hover:bg-slate-800/40 transition-colors">
+    <div className={`border rounded-xl p-3 transition-colors ${wrapCls}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          {/* Nombre + badges */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{ruta.nombre}</span>
+            {esCancelada && (
+              <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700 border-red-200">
+                <XCircle className="w-2.5 h-2.5 mr-1" />Cancelada
+              </Badge>
+            )}
+            {esSustitucion && (
+              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                <AlertTriangle className="w-2.5 h-2.5 mr-1" />Sustitución
+              </Badge>
+            )}
+            {tieneNovedad && !esCancelada && !esSustitucion && (
+              <Badge variant="outline" className="text-[10px] bg-sky-50 text-sky-700 border-sky-200">
+                Novedad registrada
+              </Badge>
+            )}
+          </div>
+
+          {/* Ruta meta */}
+          <div className="flex flex-wrap gap-2 mt-0.5 text-[11px] text-slate-400">
+            {(ruta.punto_inicio || ruta.punto_fin) && (
+              <span>{[ruta.punto_inicio, ruta.punto_fin].filter(Boolean).join(' → ')}</span>
+            )}
+            {ruta.distancia_km  && <span className="text-sky-500 font-medium">{ruta.distancia_km} km</span>}
+            {ruta.frecuencia    && <span>{ruta.frecuencia}</span>}
+          </div>
+
+          {/* Vehículos habitual / del día */}
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
+            {ruta.consumidor_id ? (
+              <span className="flex items-center gap-1 text-slate-500">
+                <Car className="w-3 h-3 text-slate-400" />
+                <span className="text-slate-400">Habitual:</span>
+                <span className="font-medium text-slate-600 dark:text-slate-300">{ruta.consumidor_nombre}</span>
+              </span>
+            ) : (
+              <span className="text-slate-300 italic text-[11px]">Sin vehículo habitual — asigna uno en el catálogo</span>
+            )}
+
+            {esSustitucion && (
+              <>
+                <ArrowRight className="w-3 h-3 text-amber-400 shrink-0" />
+                <span className="flex items-center gap-1 text-amber-700 dark:text-amber-400 font-semibold">
+                  <Car className="w-3 h-3" />Hoy: {novedad.consumidor_nombre}
+                </span>
+              </>
+            )}
+
+            {esCancelada && (
+              <span className="text-red-500 font-medium text-[11px]">No operó</span>
+            )}
+
+            {!tieneNovedad && ruta.consumidor_id && (
+              <span className="text-emerald-600 text-[10px] bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full">Normal</span>
+            )}
+          </div>
+
+          {/* Detalles de la novedad */}
+          {tieneNovedad && (
+            <div className="mt-1.5 flex flex-wrap gap-3 text-[11px] text-slate-500">
+              {novedad.conductor_nombre && (
+                <span className="flex items-center gap-1"><User2 className="w-3 h-3" />{novedad.conductor_nombre}</span>
+              )}
+              {novedad.km_reales != null && (
+                <span className="font-medium text-sky-600">
+                  {Number(novedad.km_reales).toFixed(1)} km reales
+                  {ruta.distancia_km ? <span className="text-slate-400 font-normal"> / {ruta.distancia_km} ref.</span> : ''}
+                </span>
+              )}
+              {novedad.observaciones && (
+                <span className="italic text-slate-400">{novedad.observaciones}</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {canWrite && (
+          <div className="flex items-center gap-1 shrink-0">
+            {!tieneNovedad ? (
+              <Button
+                size="sm" variant="outline"
+                className="text-xs h-7 text-slate-500 border-slate-200 hover:border-sky-300 hover:text-sky-700 dark:hover:border-sky-700"
+                onClick={onRegistrar}
+              >
+                Registrar novedad
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-slate-700" onClick={onEditar}>
+                  <Pencil className="w-3 h-3" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-500" onClick={onEliminar}>
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tarjeta de viaje extra ───────────────────────────────────────────────────
+
+function AsignacionCard({ asig, canWrite, onEdit, onDelete }) {
+  const cfg    = ESTADO_CFG[asig.estado] ?? ESTADO_CFG.completada;
+  const tipo   = getTipoViaje(asig);
+  const tipoCfg = TIPO_VIAJE_CFG[tipo] ?? TIPO_VIAJE_CFG.viaje_extra;
+  const { Icon } = cfg;
+  return (
+    <div className="border border-slate-100 dark:border-slate-700 rounded-xl p-3 hover:bg-slate-50/40 dark:hover:bg-slate-800/40 transition-colors">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className={`text-[10px] shrink-0 ${tipoCfg.cls}`}>
-              {tipoCfg.label}
-            </Badge>
-            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {tipo === 'regular' ? (ruta?.nombre || '—') : asig.descripcion_emergencia}
+            <Badge variant="outline" className={`text-[10px] shrink-0 ${tipoCfg.cls}`}>{tipoCfg.label}</Badge>
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+              {asig.descripcion_emergencia || '—'}
             </span>
           </div>
           <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-slate-500">
             <span className="flex items-center gap-1"><Car className="w-3 h-3" />{asig.consumidor_nombre || '—'}</span>
             {asig.conductor_nombre && <span className="flex items-center gap-1"><User2 className="w-3 h-3" />{asig.conductor_nombre}</span>}
-            {ruta?.municipio && <span>{ruta.municipio}</span>}
-            {asig.km_reales != null && (
-              <span className="font-medium text-sky-600">
-                {Number(asig.km_reales).toFixed(1)} km reales
-                {ruta?.distancia_km ? <span className="text-slate-400"> / {ruta.distancia_km} ref.</span> : ''}
-              </span>
-            )}
+            {asig.km_reales != null && <span className="font-medium text-sky-600">{Number(asig.km_reales).toFixed(1)} km</span>}
           </div>
           {asig.observaciones && <p className="text-[11px] text-slate-400 mt-1 italic">{asig.observaciones}</p>}
         </div>
@@ -387,38 +703,75 @@ function AsignacionCard({ asig, ruta, canWrite, onEdit, onDelete }) {
 
 export default function Rutas() {
   const { canWrite } = useUserRole();
-  const queryClient = useQueryClient();
-  const [tab, setTab] = useState('viajes');
-  const [fechaVista, setFechaVista] = useState(hoy());
-  const [showDialogAsig, setShowDialogAsig] = useState(false);
-  const [editingAsig, setEditingAsig]       = useState(null);
-  const [deleteAsigId, setDeleteAsigId]     = useState(null);
-  const [showDialogRuta, setShowDialogRuta] = useState(false);
-  const [editingRuta, setEditingRuta]       = useState(null);
-  const [deleteRutaId, setDeleteRutaId]     = useState(null);
-  const [filtroTipo, setFiltroTipo]         = useState('all');
+  const queryClient  = useQueryClient();
+  const [tab, setTab]                     = useState('viajes');
+  const [fechaVista, setFechaVista]       = useState(hoy());
+  const [rutaParaNovedad, setRutaParaNovedad] = useState(null);
+  const [editingNovedad, setEditingNovedad]   = useState(null);
+  const [showDialogAsig, setShowDialogAsig]   = useState(false);
+  const [editingAsig, setEditingAsig]         = useState(null);
+  const [deleteAsigId, setDeleteAsigId]       = useState(null);
+  const [showDialogRuta, setShowDialogRuta]   = useState(false);
+  const [editingRuta, setEditingRuta]         = useState(null);
+  const [deleteRutaId, setDeleteRutaId]       = useState(null);
+  const [filtroTipo, setFiltroTipo]           = useState('all');
 
   const { data: rutas = [] }       = useQuery({ queryKey: ['rutas'],            queryFn: () => base44.entities.Ruta.list() });
   const { data: asignaciones = [], isLoading } = useQuery({ queryKey: ['asignaciones_ruta'], queryFn: () => base44.entities.AsignacionRuta.list('-fecha', 500) });
   const { data: consumidores = [] } = useQuery({ queryKey: ['consumidores'],     queryFn: () => base44.entities.Consumidor.list() });
   const { data: conductores = [] }  = useQuery({ queryKey: ['conductores'],      queryFn: () => base44.entities.Conductor.list() });
 
-  const rutaById = useMemo(() => Object.fromEntries(rutas.map(r => [r.id, r])), [rutas]);
+  const rutaById     = useMemo(() => Object.fromEntries(rutas.map(r => [r.id, r])), [rutas]);
+  const rutasActivas = useMemo(() => rutas.filter(r => r.activa), [rutas]);
 
-  // Mutations — asignaciones
+  const mesActual    = hoy().slice(0, 7);
+  const asigMes      = useMemo(() => asignaciones.filter(a => a.fecha?.startsWith(mesActual)), [asignaciones, mesActual]);
+  const novedadesMes = useMemo(() => asigMes.filter(a => a.ruta_id),  [asigMes]);
+  const extrasMes    = useMemo(() => asigMes.filter(a => !a.ruta_id), [asigMes]);
+  const kmMes        = useMemo(() => asigMes.reduce((s, a) => s + (Number(a.km_reales) || 0), 0), [asigMes]);
+
+  // Datos del día seleccionado
+  const novedadesHoy = useMemo(() => asignaciones.filter(a => a.ruta_id  && a.fecha === fechaVista), [asignaciones, fechaVista]);
+  const extrasHoy    = useMemo(() => asignaciones.filter(a => !a.ruta_id && a.fecha === fechaVista), [asignaciones, fechaVista]);
+
+  const rutasFiltradas = useMemo(() =>
+    filtroTipo === 'activa'   ? rutas.filter(r =>  r.activa) :
+    filtroTipo === 'inactiva' ? rutas.filter(r => !r.activa) :
+    rutas
+  , [rutas, filtroTipo]);
+
+  const navegarFecha = (dias) => {
+    const d = new Date(fechaVista + 'T12:00:00');
+    d.setDate(d.getDate() + dias);
+    setFechaVista(d.toISOString().slice(0, 10));
+  };
+
+  const closeNovedad = () => { setRutaParaNovedad(null); setEditingNovedad(null); };
+
+  // Mutations — novedades / asignaciones
   const createAsigMut = useMutation({
     mutationFn: d => base44.entities.AsignacionRuta.create(d),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] }); toast.success('Viaje registrado'); setShowDialogAsig(false); },
-    onError: () => toast.error('Error al registrar el viaje'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] });
+      toast.success('Registrado');
+      setShowDialogAsig(false);
+      closeNovedad();
+    },
+    onError: () => toast.error('Error al registrar'),
   });
   const updateAsigMut = useMutation({
     mutationFn: ({ id, d }) => base44.entities.AsignacionRuta.update(id, d),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] }); toast.success('Viaje actualizado'); setEditingAsig(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] });
+      toast.success('Actualizado');
+      setEditingAsig(null);
+      closeNovedad();
+    },
     onError: () => toast.error('Error al actualizar'),
   });
   const deleteAsigMut = useMutation({
     mutationFn: id => base44.entities.AsignacionRuta.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] }); toast.success('Viaje eliminado'); setDeleteAsigId(null); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['asignaciones_ruta'] }); toast.success('Eliminado'); setDeleteAsigId(null); },
   });
 
   // Mutations — catálogo
@@ -437,34 +790,37 @@ export default function Rutas() {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['rutas'] }); toast.success('Ruta eliminada'); setDeleteRutaId(null); },
   });
 
-  // Datos derivados
-  const asigHoy    = useMemo(() => asignaciones.filter(a => a.fecha === fechaVista), [asignaciones, fechaVista]);
-  const mesActual  = hoy().slice(0, 7);
-  const asigMes    = useMemo(() => asignaciones.filter(a => a.fecha?.startsWith(mesActual)), [asignaciones, mesActual]);
-  const kmMes      = useMemo(() => asigMes.reduce((s, a) => s + (Number(a.km_reales) || 0), 0), [asigMes]);
-  const emergencias = useMemo(() => asigMes.filter(a => getTipoViaje(a) !== 'regular').length, [asigMes]);
-
-  const rutasFiltradas = useMemo(() =>
-    filtroTipo === 'all'     ? rutas :
-    filtroTipo === 'activa'  ? rutas.filter(r => r.activa) :
-    rutas.filter(r => !r.activa)
-  , [rutas, filtroTipo]);
+  // Guardar novedad (crea o actualiza la existente para ese ruta+día)
+  const handleSaveNovedad = (formData) => {
+    const payload = {
+      ...formData,
+      ruta_id:    rutaParaNovedad.id,
+      fecha:      fechaVista,
+      tipo_viaje: 'regular',
+    };
+    const destino = editingNovedad ?? novedadesHoy.find(a => a.ruta_id === rutaParaNovedad.id);
+    if (destino) {
+      updateAsigMut.mutate({ id: destino.id, d: payload });
+    } else {
+      createAsigMut.mutate(payload);
+    }
+  };
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-bold text-slate-800">Rutas</h1>
-        <p className="text-xs text-slate-400">Registro diario de viajes y catálogo de rutas</p>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Rutas</h1>
+        <p className="text-xs text-slate-400">Programa habitual de rutas con registro de novedades diarias</p>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {[
-          { label: 'Viajes este mes',   value: asigMes.length,                              cls: 'text-sky-600' },
-          { label: 'Km este mes',       value: kmMes > 0 ? `${kmMes.toFixed(0)} km` : '—', cls: 'text-slate-700' },
-          { label: 'No regulares',      value: emergencias,                                  cls: emergencias > 0 ? 'text-orange-600' : 'text-slate-400' },
-          { label: 'Rutas activas',     value: rutas.filter(r => r.activa).length,          cls: 'text-emerald-600' },
+          { label: 'Novedades este mes', value: novedadesMes.length,                              cls: novedadesMes.length > 0 ? 'text-amber-600' : 'text-slate-400' },
+          { label: 'Viajes extra',       value: extrasMes.length,                                 cls: extrasMes.length > 0 ? 'text-orange-600' : 'text-slate-400' },
+          { label: 'Km registrados',     value: kmMes > 0 ? `${kmMes.toFixed(0)} km` : '—',      cls: 'text-slate-700 dark:text-slate-200' },
+          { label: 'Rutas activas',      value: rutasActivas.length,                              cls: 'text-emerald-600' },
         ].map(k => (
           <Card key={k.label} className="border-0 shadow-sm">
             <CardContent className="p-3">
@@ -478,7 +834,7 @@ export default function Rutas() {
       {/* Tabs */}
       <div className="flex gap-0.5 flex-wrap border-b border-slate-200 dark:border-slate-700">
         {[
-          { value: 'viajes',   label: 'Viajes del día',    icon: <Navigation className="w-3.5 h-3.5" /> },
+          { value: 'viajes',   label: 'Programa diario',  icon: <Navigation className="w-3.5 h-3.5" /> },
           { value: 'catalogo', label: 'Catálogo de rutas', icon: <BookOpen   className="w-3.5 h-3.5" /> },
           { value: 'stats',    label: 'Estadísticas',      icon: <BarChart3  className="w-3.5 h-3.5" /> },
         ].map(({ value, label, icon }) => (
@@ -496,49 +852,101 @@ export default function Rutas() {
         ))}
       </div>
 
-      {/* ── Tab: Viajes ───────────────────────────────────────────────────────── */}
+      {/* ── Tab: Programa diario ─────────────────────────────────────────────── */}
       {tab === 'viajes' && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <Input
-              type="date" value={fechaVista}
-              onChange={e => setFechaVista(e.target.value)}
-              className="w-40 h-8 text-xs"
-            />
-            <span className="text-xs text-slate-400 flex-1">
-              {isLoading ? 'Cargando...' : asigHoy.length === 0 ? 'Sin viajes registrados' : `${asigHoy.length} viaje${asigHoy.length !== 1 ? 's' : ''}`}
-            </span>
-            {canWrite && (
-              <Button size="sm" className="bg-sky-600 hover:bg-sky-700 gap-1.5" onClick={() => setShowDialogAsig(true)}>
-                <Plus className="w-3.5 h-3.5" /> Registrar viaje
+        <div className="space-y-5">
+          {/* Navegación de fecha */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navegarFecha(-1)}>
+                <ChevronLeft className="w-4 h-4" />
               </Button>
+              <Input
+                type="date" value={fechaVista}
+                onChange={e => setFechaVista(e.target.value)}
+                className="w-40 h-8 text-xs"
+              />
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => navegarFecha(1)}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+            <span className="text-xs text-slate-400 capitalize">
+              {new Date(fechaVista + 'T12:00:00').toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
+            {isLoading && <span className="text-xs text-slate-300 ml-auto">Cargando...</span>}
+          </div>
+
+          {/* Rutas activas del día */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Rutas activas · {rutasActivas.length}
+              </h3>
+              {rutasActivas.length > 0 && novedadesHoy.length > 0 && (
+                <span className="text-[10px] text-amber-600 font-medium">
+                  {novedadesHoy.length} novedad{novedadesHoy.length !== 1 ? 'es' : ''} hoy
+                </span>
+              )}
+            </div>
+
+            {rutasActivas.length === 0 ? (
+              <div className="py-10 text-center space-y-2">
+                <Navigation className="w-8 h-8 text-slate-200 mx-auto" />
+                <p className="text-sm text-slate-400">No hay rutas activas en el catálogo.</p>
+                <Button size="sm" variant="outline" onClick={() => setTab('catalogo')}>Ir al catálogo</Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {rutasActivas.map(ruta => {
+                  const novedad = novedadesHoy.find(a => a.ruta_id === ruta.id) ?? null;
+                  return (
+                    <RutaDiaRow
+                      key={ruta.id}
+                      ruta={ruta}
+                      novedad={novedad}
+                      canWrite={canWrite}
+                      onRegistrar={() => { setRutaParaNovedad(ruta); setEditingNovedad(null); }}
+                      onEditar={() => { setRutaParaNovedad(ruta); setEditingNovedad(novedad); }}
+                      onEliminar={() => setDeleteAsigId(novedad?.id)}
+                    />
+                  );
+                })}
+              </div>
             )}
           </div>
 
-          {!isLoading && asigHoy.length === 0 ? (
-            <div className="py-14 text-center space-y-3">
-              <Navigation className="w-10 h-10 text-slate-200 mx-auto" />
-              <p className="text-sm text-slate-400">No hay viajes registrados para este día</p>
+          {/* Viajes extra del día */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Viajes extra · {extrasHoy.length}
+              </h3>
               {canWrite && (
-                <Button size="sm" variant="outline" onClick={() => setShowDialogAsig(true)} className="gap-1">
-                  <Plus className="w-3.5 h-3.5" /> Registrar el primero
+                <Button
+                  size="sm" variant="outline"
+                  className="gap-1 text-xs h-7 text-orange-600 border-orange-200 hover:bg-orange-50 dark:border-orange-800/50 dark:hover:bg-orange-900/20"
+                  onClick={() => setShowDialogAsig(true)}
+                >
+                  <Plus className="w-3 h-3" /> Registrar viaje extra
                 </Button>
               )}
             </div>
-          ) : (
-            <div className="space-y-2">
-              {asigHoy.map(asig => (
-                <AsignacionCard
-                  key={asig.id}
-                  asig={asig}
-                  ruta={rutaById[asig.ruta_id]}
-                  canWrite={canWrite}
-                  onEdit={() => setEditingAsig(asig)}
-                  onDelete={() => setDeleteAsigId(asig.id)}
-                />
-              ))}
-            </div>
-          )}
+            {extrasHoy.length === 0 ? (
+              <p className="text-xs text-slate-300 text-center py-3">Sin viajes extra este día</p>
+            ) : (
+              <div className="space-y-2">
+                {extrasHoy.map(asig => (
+                  <AsignacionCard
+                    key={asig.id}
+                    asig={asig}
+                    canWrite={canWrite}
+                    onEdit={() => setEditingAsig(asig)}
+                    onDelete={() => setDeleteAsigId(asig.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -571,9 +979,14 @@ export default function Rutas() {
           ) : (
             <div className="space-y-2">
               {rutasFiltradas.map(r => {
-                const viajesMes = asigMes.filter(a => a.ruta_id === r.id).length;
+                const viajesMes = novedadesMes.filter(a => a.ruta_id === r.id).length;
                 return (
-                  <div key={r.id} className={`border rounded-xl p-3 transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-800/40 ${r.activa ? 'border-slate-100 dark:border-slate-700' : 'border-slate-100 opacity-50 dark:border-slate-700'}`}>
+                  <div
+                    key={r.id}
+                    className={`border rounded-xl p-3 transition-colors hover:bg-slate-50/40 dark:hover:bg-slate-800/40 ${
+                      r.activa ? 'border-slate-100 dark:border-slate-700' : 'border-slate-100 dark:border-slate-700 opacity-50'
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -582,16 +995,34 @@ export default function Rutas() {
                         </div>
                         <div className="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500">
                           {r.punto_inicio && r.punto_fin && <span>{r.punto_inicio} → {r.punto_fin}</span>}
-                          {r.municipio && <span>{r.municipio}</span>}
-                          {r.distancia_km && <span className="font-medium text-sky-600">{r.distancia_km} km</span>}
+                          {r.municipio       && <span>{r.municipio}</span>}
+                          {r.distancia_km    && <span className="font-medium text-sky-600">{r.distancia_km} km</span>}
                           {r.tiempo_estimado && <span>{r.tiempo_estimado}</span>}
-                          {r.frecuencia && <span className="text-slate-400">{r.frecuencia}</span>}
+                          {r.frecuencia      && <span className="text-slate-400">{r.frecuencia}</span>}
                         </div>
+                        {/* Asignación habitual */}
+                        {(r.consumidor_nombre || r.conductor_nombre) && (
+                          <div className="flex flex-wrap gap-3 mt-1.5 text-[11px] text-slate-500 border-t border-slate-50 dark:border-slate-800 pt-1.5">
+                            {r.consumidor_nombre && (
+                              <span className="flex items-center gap-1">
+                                <Car className="w-3 h-3 text-slate-400" />{r.consumidor_nombre}
+                              </span>
+                            )}
+                            {r.conductor_nombre && (
+                              <span className="flex items-center gap-1">
+                                <User2 className="w-3 h-3 text-slate-400" />{r.conductor_nombre}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {!r.consumidor_id && r.activa && (
+                          <p className="text-[10px] text-amber-500 mt-1 italic">Sin vehículo habitual asignado</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {viajesMes > 0 && (
                           <span className="text-[10px] text-sky-600 font-semibold bg-sky-50 dark:bg-sky-900/40 px-2 py-0.5 rounded-full">
-                            {viajesMes} viaje{viajesMes !== 1 ? 's' : ''}/mes
+                            {viajesMes} novedad{viajesMes !== 1 ? 'es' : ''}/mes
                           </span>
                         )}
                         {canWrite && (<>
@@ -616,28 +1047,30 @@ export default function Rutas() {
       {tab === 'stats' && (
         <div className="space-y-4">
           {asigMes.length === 0 ? (
-            <div className="py-14 text-center text-sm text-slate-400">Sin viajes registrados este mes</div>
+            <div className="py-14 text-center text-sm text-slate-400">Sin novedades ni viajes extra registrados este mes</div>
           ) : (<>
-            {/* Rutas más frecuentes */}
+            {/* Rutas con más novedades */}
             <Card className="border-0 shadow-sm">
               <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold text-slate-700">Rutas más frecuentes — mes actual</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">Novedades por ruta — mes actual</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-slate-50 dark:divide-slate-800">
                   {(() => {
                     const counts = {};
-                    asigMes.forEach(a => {
-                      const key = a.ruta_id ? (rutaById[a.ruta_id]?.nombre || 'Ruta') : `⚡ ${a.descripcion_emergencia || 'Emergencia'}`;
-                      counts[key] = (counts[key] || 0) + 1;
+                    novedadesMes.forEach(a => {
+                      const nombre = rutaById[a.ruta_id]?.nombre || 'Ruta';
+                      counts[nombre] = (counts[nombre] || 0) + 1;
                     });
+                    if (Object.keys(counts).length === 0)
+                      return <p className="text-xs text-slate-400 px-4 py-3">Sin novedades registradas</p>;
                     const max = Math.max(...Object.values(counts), 1);
                     return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([nombre, count]) => (
                       <div key={nombre} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="flex-1 min-w-0">
                           <p className="text-xs text-slate-700 dark:text-slate-200 truncate">{nombre}</p>
                           <div className="mt-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                            <div className="h-full bg-sky-400 rounded-full transition-all" style={{ width: `${(count / max) * 100}%` }} />
+                            <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${(count / max) * 100}%` }} />
                           </div>
                         </div>
                         <span className="text-sm font-bold text-slate-800 dark:text-slate-100 tabular-nums shrink-0">{count}</span>
@@ -651,24 +1084,25 @@ export default function Rutas() {
             {/* Actividad por vehículo */}
             <Card className="border-0 shadow-sm">
               <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold text-slate-700">Actividad por vehículo — mes actual</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">Registros por vehículo — mes actual</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-slate-50 dark:divide-slate-800">
                   {(() => {
                     const byVeh = {};
                     asigMes.forEach(a => {
-                      const key = a.consumidor_nombre || a.consumidor_id || '—';
-                      if (!byVeh[key]) byVeh[key] = { viajes: 0, km: 0 };
-                      byVeh[key].viajes++;
+                      const key = a.consumidor_nombre || '—';
+                      if (!byVeh[key]) byVeh[key] = { novedades: 0, extras: 0, km: 0 };
+                      if (a.ruta_id) byVeh[key].novedades++; else byVeh[key].extras++;
                       byVeh[key].km += Number(a.km_reales) || 0;
                     });
-                    return Object.entries(byVeh).sort((a, b) => b[1].viajes - a[1].viajes).map(([nombre, s]) => (
+                    return Object.entries(byVeh).sort((a, b) => (b[1].novedades + b[1].extras) - (a[1].novedades + a[1].extras)).map(([nombre, s]) => (
                       <div key={nombre} className="flex items-center gap-3 px-4 py-2.5">
                         <Car className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <p className="text-sm text-slate-700 dark:text-slate-200 flex-1 truncate">{nombre}</p>
-                        <span className="text-xs text-slate-500 tabular-nums">{s.viajes} viaje{s.viajes !== 1 ? 's' : ''}</span>
-                        {s.km > 0 && <span className="text-xs font-semibold text-sky-600 tabular-nums">{s.km.toFixed(0)} km</span>}
+                        {s.novedades > 0 && <span className="text-xs text-amber-600 tabular-nums">{s.novedades} nov.</span>}
+                        {s.extras    > 0 && <span className="text-xs text-orange-600 tabular-nums">{s.extras} extra{s.extras !== 1 ? 's' : ''}</span>}
+                        {s.km        > 0 && <span className="text-xs font-semibold text-sky-600 tabular-nums">{s.km.toFixed(0)} km</span>}
                       </div>
                     ));
                   })()}
@@ -679,21 +1113,20 @@ export default function Rutas() {
             {/* Desglose por tipo */}
             <Card className="border-0 shadow-sm">
               <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-sm font-semibold text-slate-700">Desglose por tipo — mes actual</CardTitle>
+                <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-200">Viajes extra por tipo — mes actual</CardTitle>
               </CardHeader>
               <CardContent className="p-0 pb-3">
                 <div className="divide-y divide-slate-50 dark:divide-slate-800">
-                  {Object.entries(TIPO_VIAJE_CFG).map(([key, tcfg]) => {
-                    const count = asigMes.filter(a => getTipoViaje(a) === key).length;
-                    const pct   = ((count / Math.max(asigMes.length, 1)) * 100).toFixed(0);
+                  {Object.entries(TIPO_VIAJE_CFG).filter(([k]) => k !== 'regular').map(([key, tcfg]) => {
+                    const count = extrasMes.filter(a => getTipoViaje(a) === key).length;
+                    const pct   = ((count / Math.max(extrasMes.length, 1)) * 100).toFixed(0);
                     return (
                       <div key={key} className="flex items-center gap-3 px-4 py-2.5">
                         <Badge variant="outline" className={`text-[10px] shrink-0 ${tcfg.cls}`}>{tcfg.label}</Badge>
                         <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                          <div className="h-full bg-sky-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                          <div className="h-full bg-orange-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
                         </div>
                         <span className="text-sm font-bold text-slate-800 dark:text-slate-100 tabular-nums w-6 text-right">{count}</span>
-                        <span className="text-[10px] text-slate-400 tabular-nums w-8 text-right">{pct}%</span>
                       </div>
                     );
                   })}
@@ -705,10 +1138,19 @@ export default function Rutas() {
       )}
 
       {/* ── Diálogos ──────────────────────────────────────────────────────────── */}
+      {rutaParaNovedad && (
+        <DialogNovedad
+          ruta={rutaParaNovedad}
+          novedad={editingNovedad}
+          consumidores={consumidores}
+          conductores={conductores}
+          onClose={closeNovedad}
+          onSave={handleSaveNovedad}
+        />
+      )}
       {(showDialogAsig || editingAsig) && (
         <DialogAsignacion
           asignacion={editingAsig}
-          rutas={rutas}
           consumidores={consumidores}
           conductores={conductores}
           onClose={() => { setShowDialogAsig(false); setEditingAsig(null); }}
@@ -720,6 +1162,8 @@ export default function Rutas() {
       {(showDialogRuta || editingRuta) && (
         <DialogRuta
           ruta={editingRuta}
+          consumidores={consumidores}
+          conductores={conductores}
           onClose={() => { setShowDialogRuta(false); setEditingRuta(null); }}
           onSave={d => editingRuta
             ? updateRutaMut.mutate({ id: editingRuta.id, d })
@@ -728,8 +1172,8 @@ export default function Rutas() {
       )}
       {deleteAsigId && (
         <ConfirmDialog
-          title="Eliminar viaje"
-          description="¿Seguro que deseas eliminar este registro? Esta acción no se puede deshacer."
+          title="Eliminar registro"
+          description="¿Seguro que deseas eliminar este registro?"
           onConfirm={() => deleteAsigMut.mutate(deleteAsigId)}
           onCancel={() => setDeleteAsigId(null)}
         />

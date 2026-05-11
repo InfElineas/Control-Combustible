@@ -23,37 +23,6 @@ function getIconForTipo(nombre) {
   return '🚗';
 }
 
-function CapacidadBar({ litrosActuales, capacidad }) {
-  const [hovered, setHovered] = useState(false);
-
-  if (!capacidad || capacidad <= 0) {
-    // Barra relativa al máximo del reporte
-    return null;
-  }
-
-  const pct = Math.min(100, (litrosActuales / capacidad) * 100);
-  const color = pct < 20 ? 'bg-red-400' : pct < 50 ? 'bg-amber-400' : 'bg-sky-400';
-
-  return (
-    <div className="relative w-full"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      {hovered && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10 bg-slate-800 text-white text-[10px] px-2 py-1 rounded-md whitespace-nowrap shadow-lg">
-          {litrosActuales.toFixed(1)} L de {capacidad} L — <b>{pct.toFixed(0)}%</b> de capacidad
-        </div>
-      )}
-      <div className="flex justify-between text-[9px] text-slate-400 mt-0.5">
-        <span>{litrosActuales.toFixed(1)} L</span>
-        <span>Cap: {capacidad} L ({pct.toFixed(0)}%)</span>
-      </div>
-    </div>
-  );
-}
 
 function BarraRelativa({ pct, litros }) {
   const [hovered, setHovered] = useState(false);
@@ -80,22 +49,26 @@ export default function ReporteVehiculos({ consumidores, movimientos }) {
 
   const reporteConsumidores = useMemo(() => {
     return consumidores.map(c => {
-      const movs = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
-      const litros = movs.reduce((s, m) => s + (m.litros || 0), 0);
-      const monto = movs.reduce((s, m) => s + (m.monto || 0), 0);
+      const movsAbast  = movimientos.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id);
+      const movsCompra = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
+      const litros = movsAbast.reduce((s, m) => s + (m.litros || 0), 0);
+      const monto  = movsCompra.reduce((s, m) => s + (m.monto  || 0), 0);
 
       const porComb = {};
-      movs.forEach(m => {
+      movsAbast.forEach(m => {
         const key = m.combustible_nombre || 'Otro';
         if (!porComb[key]) porComb[key] = { litros: 0, monto: 0 };
         porComb[key].litros += m.litros || 0;
+      });
+      movsCompra.forEach(m => {
+        const key = m.combustible_nombre || 'Otro';
+        if (!porComb[key]) porComb[key] = { litros: 0, monto: 0 };
         porComb[key].monto += m.monto || 0;
       });
 
-      // Capacidad del tanque (datos_vehiculo o datos_tanque)
       const capacidad = c.datos_vehiculo?.capacidad_tanque || c.datos_tanque?.capacidad_litros || null;
 
-      return { c, litros, monto, compras: movs.length, porComb, capacidad };
+      return { c, litros, monto, compras: movsAbast.length, porComb, capacidad };
     }).filter(r => r.compras > 0);
   }, [consumidores, movimientos]);
 
@@ -171,7 +144,6 @@ export default function ReporteVehiculos({ consumidores, movimientos }) {
           <div className="divide-y divide-slate-100">
             {sorted.map((r, idx) => {
               const pctRelativo = (r.litros / maxLitros) * 100;
-              const tieneCapacidad = r.capacidad && r.capacidad > 0;
 
               return (
                 <div key={r.c.id} className={`px-4 py-3 ${idx === 0 ? 'bg-sky-50/40' : 'hover:bg-slate-50/60'} transition-colors`}>
@@ -226,12 +198,9 @@ export default function ReporteVehiculos({ consumidores, movimientos }) {
                         </div>
                       </div>
 
-                      {/* Barra: con capacidad muestra % real, sin capacidad muestra relativa */}
+                      {/* Barra relativa al mayor consumidor del período */}
                       <div className="mb-1.5">
-                        {tieneCapacidad
-                          ? <CapacidadBar litrosActuales={r.litros} capacidad={r.capacidad} />
-                          : <BarraRelativa pct={pctRelativo} litros={r.litros} />
-                        }
+                        <BarraRelativa pct={pctRelativo} litros={r.litros} />
                       </div>
 
                       {/* Desglose por combustible */}

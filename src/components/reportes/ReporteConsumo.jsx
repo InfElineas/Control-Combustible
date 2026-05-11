@@ -29,20 +29,30 @@ export default function ReporteConsumo({ consumidores, movimientos }) {
     return consumidores
       .filter(c => c.activo)
       .map(c => {
+        const movsAbast  = movimientos.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id);
         const movsCompra = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
-        const litrosTotal = movsCompra.reduce((s, m) => s + (m.litros || 0), 0);
-        const montoTotal = movsCompra.reduce((s, m) => s + (m.monto || 0), 0);
-        const cargas = movsCompra.length;
+        const litrosTotal = movsAbast.reduce((s, m) => s + (m.litros || 0), 0);
+        const montoTotal  = movsCompra.reduce((s, m) => s + (m.monto  || 0), 0);
+        const cargas = movsAbast.length;
 
-        // Consumo real: incluye COMPRA y DESPACHO (vehículos abastecidos desde reserva también registran km/L)
+        // Consumo real: computed from odometer sequence (not stale DB consumo_real field)
         const movsConOdo = movimientos
-          .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.consumo_real != null)
-          .sort((a, b) => b.fecha.localeCompare(a.fecha));
-        const consumoUltimo = movsConOdo.length > 0 ? movsConOdo[0].consumo_real : null;
+          .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.odometro != null)
+          .sort((a, b) => (a.odometro || 0) - (b.odometro || 0));
 
-        // Consumo promedio (media de todos los consumos registrados)
-        const consumoPromedio = movsConOdo.length > 0
-          ? movsConOdo.reduce((s, m) => s + m.consumo_real, 0) / movsConOdo.length
+        const kmlFills = movsConOdo
+          .map((fill, idx) => {
+            if (idx === 0) return null;
+            const prev = movsConOdo[idx - 1];
+            const km  = (fill.odometro || 0) - (prev.odometro || 0);
+            const lit = fill.litros || 0;
+            return (km > 0 && lit > 0) ? km / lit : null;
+          })
+          .filter(v => v !== null);
+
+        const consumoUltimo  = kmlFills.length > 0 ? kmlFills[kmlFills.length - 1] : null;
+        const consumoPromedio = kmlFills.length > 0
+          ? kmlFills.reduce((s, v) => s + v, 0) / kmlFills.length
           : null;
 
         // Índice de referencia del vehículo
@@ -53,14 +63,20 @@ export default function ReporteConsumo({ consumidores, movimientos }) {
         const estadoUltimo = getAlertaStatus(consumoUltimo, consumoRef, umbralAlerta, umbralCritico);
         const estadoPromedio = getAlertaStatus(consumoPromedio, consumoRef, umbralAlerta, umbralCritico);
 
-        // Historial de odómetro (últimas cargas con odómetro)
-        const historial = movsConOdo.slice(0, 5).map(m => ({
-          fecha: m.fecha,
-          odometro: m.odometro,
-          km: m.km_recorridos,
-          litros: m.litros,
-          consumo: m.consumo_real,
-        }));
+        // Historial de odómetro (últimas 5 cargas, más recientes primero)
+        const movsConOdoDesc = [...movsConOdo].sort((a, b) => b.fecha.localeCompare(a.fecha));
+        const historial = movsConOdoDesc.slice(0, 5).map((m, i) => {
+          const idxAsc = movsConOdo.findIndex(x => x.id === m.id);
+          const kml = idxAsc > 0
+            ? (() => {
+                const prev = movsConOdo[idxAsc - 1];
+                const km  = (m.odometro || 0) - (prev.odometro || 0);
+                const lit = m.litros || 0;
+                return (km > 0 && lit > 0) ? km / lit : null;
+              })()
+            : null;
+          return { fecha: m.fecha, odometro: m.odometro, km: m.km_recorridos, litros: m.litros, consumo: kml };
+        });
 
         return {
           id: c.id,

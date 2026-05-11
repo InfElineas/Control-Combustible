@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, ChevronDown, Droplets, Eye, Gauge, User } from 'lucide-react';
+import { AlertTriangle, Calendar, ChevronDown, Clock, Droplets, Eye, Gauge, User } from 'lucide-react';
 import { formatMonto } from '@/components/ui-helpers/SaldoUtils';
 import CombustibleBadge from '@/components/ui-helpers/CombustibleBadge';
 
@@ -81,6 +81,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
   const esTanqueConsumidor = esTanque(consumidor);
   const esEquipoConsumidor = esEquipo(consumidor);
   const [detallesOpen, setDetallesOpen] = useState(false);
+  const [mesDetallesOpen, setMesDetallesOpen] = useState(false);
 
   // ── Compras ordenadas por fecha desc ──────────────────────────────────────
   const compras = React.useMemo(() =>
@@ -248,15 +249,6 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
   const umbralCritico     = consumidor.datos_vehiculo?.umbral_critico_pct ?? 30;
   const umbralAlerta      = consumidor.datos_vehiculo?.umbral_alerta_pct  ?? 15;
 
-  // Prioridad para alertas: nivel_tanque > índice_mes_odo > última_carga
-  const consumoParaAlerta = nivelData?.indice ?? indiceConsumoRealMes ?? ultimoConsumoReal;
-  let estadoConsumo = null;
-  let desvPct       = null;
-  if (consumoRef && consumoParaAlerta != null) {
-    desvPct = ((consumoRef - consumoParaAlerta) / consumoRef) * 100;
-    if (desvPct >= umbralCritico) estadoConsumo = 'critico';
-    else if (desvPct >= umbralAlerta) estadoConsumo = 'alerta';
-  }
 
   // ── Estado vehículo ───────────────────────────────────────────────────────
   const estadoVehiculo = consumidor.datos_vehiculo?.estado_vehiculo;
@@ -295,6 +287,109 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
   }, [esTanqueConsumidor, movimientos, consumidor.id, periodo]);
 
   const stockPct = capacidad && stockActual != null ? (stockActual / capacidad) * 100 : null;
+
+  // ── Desglose mensual ─────────────────────────────────────────────────────
+  const monthlyStats = React.useMemo(() => {
+    const todos = [...compras, ...despachosRecibidos]
+      .filter(m => m.fecha)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const meses = [...new Set(todos.map(m => m.fecha.slice(0, 7)))].sort((a, b) => b.localeCompare(a));
+    return meses.map((mes, mesIdx) => {
+      const movsDelMes    = todos.filter(m => m.fecha.startsWith(mes));
+      const comprasDelMes = movsDelMes.filter(m => m.tipo === 'COMPRA');
+      const litros        = movsDelMes.reduce((s, m) => s + (m.litros || 0), 0);
+      const monto         = comprasDelMes.reduce((s, m) => s + (m.monto || 0), 0);
+      const conOdo        = movsDelMes.filter(m => m.odometro != null).sort((a, b) => a.odometro - b.odometro);
+      const odoFinMes     = conOdo.length > 0 ? conOdo[conOdo.length - 1].odometro : null;
+      const antesDelMes   = todos.filter(m => m.fecha < mes + '-01' && m.odometro != null);
+      const odoInicioMes  = antesDelMes.length > 0
+        ? Math.max(...antesDelMes.map(m => m.odometro))
+        : (conOdo.length > 0 ? conOdo[0].odometro : null);
+      const kmRecorridos  = odoFinMes != null && odoInicioMes != null && odoFinMes > odoInicioMes
+        ? odoFinMes - odoInicioMes
+        : null;
+      const odoInconsistente = odoInicioMes != null && odoFinMes != null && odoFinMes < odoInicioMes;
+      // Calcular km/L directamente desde los odómetros en orden cronológico,
+      // sin leer consumo_real de la BD (que puede quedar obsoleto al editar un odo anterior).
+      const todosConOdoAsc = todos
+        .filter(m => m.odometro != null)
+        .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.odometro - b.odometro));
+
+      const kmlPorFill = conOdo
+        .slice()
+        .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.odometro - b.odometro))
+        .map(fill => {
+          const idx = todosConOdoAsc.findIndex(m => m.id === fill.id);
+          if (idx <= 0) return null; // sin carga anterior con odo → no se puede calcular
+          const prev = todosConOdoAsc[idx - 1];
+          const km  = (fill.odometro || 0) - (prev.odometro || 0);
+          const lit = fill.litros || 0;
+          return (km > 0 && lit > 0) ? km / lit : null;
+        })
+        .filter(v => v != null);
+
+      const consumoReal = kmlPorFill.length > 0
+        ? kmlPorFill.reduce((s, v) => s + v, 0) / kmlPorFill.length
+        : null;
+
+      // sinCierre: hay odo en el mes pero no se puede calcular km/L aún
+      // (ninguna carga del mes tiene una carga previa con odómetro registrado)
+      const sinCierre = conOdo.length > 0 && consumoReal == null && !odoInconsistente;
+
+      // consumoAnomalo: km/L > 200 = salto de odo incorrecto o litros casi nulos
+      const consumoAnomalo = consumoReal != null && consumoReal > 200;
+
+      const litrosConsumidosEst = kmRecorridos != null && consumoReal != null && consumoReal > 0 && !consumoAnomalo
+        ? kmRecorridos / consumoReal
+        : null;
+
+      // Cargas del mes sin carga previa con odo (para tooltip de diagnóstico)
+      const fillsSinConsumoReal = sinCierre
+        ? conOdo.filter(fill => todosConOdoAsc.findIndex(m => m.id === fill.id) <= 0)
+        : [];
+
+      // ── Nivel físico en tanque al cierre del mes ──────────────────────────
+      // Estrategia A (exacto): nivel_tanque de la 1ª carga del mes siguiente
+      // = cuánto había en el tanque al llegar a esa carga = cierre exacto del mes actual
+      const mesSiguiente = mesIdx > 0 ? meses[mesIdx - 1] : null; // meses está desc → el anterior en idx es el más reciente
+      const primeraDelMesSig = mesSiguiente
+        ? todos
+            .filter(m => m.fecha.startsWith(mesSiguiente) && m.nivel_tanque != null)
+            .sort((a, b) => a.fecha.localeCompare(b.fecha))[0]
+        : null;
+      const nivelCierreExacto = primeraDelMesSig?.nivel_tanque ?? null;
+
+      // Estrategia B (estimado superior): nivel_tanque + litros de la última carga del mes con nivel
+      // Solo aplicable al mes más reciente (mesIdx === 0), representa el nivel justo tras la última carga
+      const ultimaConNivel = mesIdx === 0
+        ? movsDelMes
+            .filter(m => m.nivel_tanque != null)
+            .sort((a, b) => b.fecha.localeCompare(a.fecha))[0]
+        : null;
+      const nivelCierreEst = ultimaConNivel != null
+        ? (ultimaConNivel.nivel_tanque || 0) + (ultimaConNivel.litros || 0)
+        : null;
+
+      const nivelCierre    = nivelCierreExacto ?? nivelCierreEst;
+      const nivelCierreEsExacto = nivelCierreExacto != null;
+
+      return { mes, cargas: movsDelMes.length, litros, monto, odoInicioMes, odoFinMes, kmRecorridos, consumoReal, odoInconsistente, sinCierre, consumoAnomalo, litrosConsumidosEst, nivelCierre, nivelCierreEsExacto, fillsSinConsumoReal };
+    });
+  }, [compras, despachosRecibidos]);
+
+  // Consumo real calculado desde secuencia de odómetros (no desde campo BD)
+  const statMesRef = monthlyStats.find(s => s.mes === mesReferencia) ?? null;
+  const consumoRealCalculado = statMesRef?.consumoReal ?? null;
+
+  // Prioridad para alertas: nivel_tanque > índice_odo_mes
+  const consumoParaAlerta = nivelData?.indice ?? consumoRealCalculado;
+  let estadoConsumo = null;
+  let desvPct       = null;
+  if (consumoRef && consumoParaAlerta != null) {
+    desvPct = ((consumoRef - consumoParaAlerta) / consumoRef) * 100;
+    if (desvPct >= umbralCritico) estadoConsumo = 'critico';
+    else if (desvPct >= umbralAlerta) estadoConsumo = 'alerta';
+  }
 
   // ── Estilos ───────────────────────────────────────────────────────────────
   const ringCard = estadoConsumo === 'critico' ? 'ring-1 ring-red-200'
@@ -497,6 +592,7 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
 
   // ━━━━━━━━━━━━━━━━━━━━ VEHÍCULO / EQUIPO CARD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   return (
+    <>
     <Card className={`border border-slate-200 shadow-sm ${ringCard}`}>
       <CardContent className="p-3 space-y-2">
 
@@ -623,14 +719,20 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
                   <>
                     <p className="text-[9px] text-slate-400 leading-none mb-0.5">Consumo real</p>
                     {(() => {
-                      const val = indiceConsumoRealMes ?? ultimoConsumoReal;
-                      if (val == null) return <p className="text-slate-300 font-normal">—</p>;
+                      const val = consumoRealCalculado;
+                      if (val == null) {
+                        const reason = statMesRef?.odoInconsistente
+                          ? 'Inconsistencia de odómetro: el valor final es menor al inicial. Revise los registros en Movimientos → Editar.'
+                          : statMesRef?.sinCierre
+                            ? 'Pendiente: el km/L se calculará cuando haya una carga posterior con odómetro registrado.'
+                            : 'Sin odómetro registrado en los abastecimientos de este período, o es la primera carga histórica del vehículo. Registre el odómetro en la carga para calcular el consumo.';
+                        return (
+                          <p className="text-slate-300 font-normal cursor-help" title={reason}>—</p>
+                        );
+                      }
                       const colorClass = estadoConsumo === 'critico' ? 'text-red-600' : estadoConsumo === 'alerta' ? 'text-amber-600' : 'text-emerald-700';
                       return (
-                        <>
-                          <p className={`font-semibold tabular-nums ${colorClass}`}>{val.toFixed(2)} km/L</p>
-                          {indiceConsumoRealMes == null && <p className="text-[9px] text-slate-400">última carga</p>}
-                        </>
+                        <p className={`font-semibold tabular-nums ${colorClass}`}>{val.toFixed(2)} km/L</p>
                       );
                     })()}
                   </>
@@ -678,6 +780,18 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
           ) : <span className="text-slate-300">Sin registros</span>}
         </div>
 
+        {/* ── VER DETALLES POR MES ── */}
+        {monthlyStats.length > 1 && (
+          <Button
+            variant="outline" size="sm"
+            className="w-full h-7 text-xs text-sky-600 border-sky-200 hover:bg-sky-50 dark:border-sky-800/50 dark:text-sky-400 dark:hover:bg-sky-900/20"
+            onClick={() => setMesDetallesOpen(true)}
+          >
+            <Calendar className="w-3 h-3 mr-1.5" />
+            Ver detalles por mes ({monthlyStats.length} meses)
+          </Button>
+        )}
+
         {/* ── DÍAS SIN ABASTECIMIENTO ── */}
         <div className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${diasStyle}`}>
           <span className="opacity-75">Sin abastecimiento</span>
@@ -688,6 +802,180 @@ function ConsumidorCard({ consumidor, movimientos, hoy, mesFiltro = 'ALL' }) {
 
       </CardContent>
     </Card>
+
+    {/* ── MODAL DETALLES POR MES ── */}
+    {mesDetallesOpen && (
+      <Dialog open={mesDetallesOpen} onOpenChange={setMesDetallesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">Consumo por mes — {consumidor.nombre}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto -mx-1 px-1">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-white dark:bg-slate-900">
+                <tr className="border-b border-slate-100 dark:border-slate-700 text-[11px] text-slate-400 uppercase tracking-wide">
+                  <th className="text-left py-2 pr-3">Mes</th>
+                  <th className="text-right py-2 pr-3">Cargas</th>
+                  <th className="text-right py-2 pr-3">Litros</th>
+                  <th className="text-right py-2 pr-3 hidden sm:table-cell">Monto</th>
+                  {!esEquipoConsumidor && <th className="text-right py-2 pr-3 hidden md:table-cell">Odo. inicio</th>}
+                  {!esEquipoConsumidor && <th className="text-right py-2 pr-3 hidden md:table-cell">Odo. fin</th>}
+                  {!esEquipoConsumidor && <th className="text-right py-2 pr-3">Km rec.</th>}
+                  {!esEquipoConsumidor && <th className="text-right py-2 pr-3">km/L</th>}
+                  {!esEquipoConsumidor && monthlyStats.some(m => m.nivelCierre != null) && (
+                    <th className="text-right py-2 text-sky-500" title="Litros físicos en el tanque al cierre del mes (dato registrado)">En tanque</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                {monthlyStats.map(({ mes, cargas, litros, monto, odoInicioMes, odoFinMes, kmRecorridos, consumoReal, odoInconsistente, sinCierre, consumoAnomalo, nivelCierre, nivelCierreEsExacto, fillsSinConsumoReal }, rowIdx) => {
+                  const esMesReciente = rowIdx === 0;
+                  const pendienteIntermedio = sinCierre && !esMesReciente;
+                  return (
+                  <tr key={mes} className={
+                    odoInconsistente ? 'bg-amber-50/60 dark:bg-amber-900/10'
+                    : pendienteIntermedio ? 'bg-amber-50/40 dark:bg-amber-900/10'
+                    : 'hover:bg-slate-50/60 dark:hover:bg-slate-800/40'
+                  }>
+                    <td className="py-2 pr-3 font-medium text-slate-700 dark:text-slate-200 capitalize">
+                      {new Date(mes + '-02').toLocaleDateString('es', { month: 'long', year: 'numeric' })}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{cargas}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums font-semibold text-slate-700 dark:text-slate-200">{litros.toFixed(1)} L</td>
+                    <td className="py-2 pr-3 text-right text-slate-500 hidden sm:table-cell">{monto > 0 ? formatMonto(monto) : '—'}</td>
+                    {!esEquipoConsumidor && (
+                      <td className={`py-2 pr-3 text-right tabular-nums hidden md:table-cell ${odoInconsistente ? 'text-amber-600 font-semibold' : 'text-slate-400'}`}>
+                        {odoInicioMes != null ? odoInicioMes.toLocaleString() : '—'}
+                      </td>
+                    )}
+                    {!esEquipoConsumidor && (
+                      <td className={`py-2 pr-3 text-right tabular-nums hidden md:table-cell ${odoInconsistente ? 'text-amber-600 font-semibold' : 'text-slate-400'}`}>
+                        {odoFinMes != null ? odoFinMes.toLocaleString() : '—'}
+                      </td>
+                    )}
+                    {!esEquipoConsumidor && (
+                      <td className="py-2 pr-3 text-right tabular-nums text-sky-700 font-semibold">
+                        {odoInconsistente
+                          ? <span className="flex items-center justify-end gap-1 text-amber-600"><AlertTriangle className="w-3 h-3" />—</span>
+                          : kmRecorridos != null ? kmRecorridos.toLocaleString() : '—'
+                        }
+                      </td>
+                    )}
+                    {!esEquipoConsumidor && (
+                      <td className="py-2 pr-3 text-right tabular-nums">
+                        {consumoReal != null
+                          ? consumoAnomalo
+                            ? <span className="inline-flex items-center justify-end gap-1 text-red-500 font-semibold" title="Valor atípico: probable error de carga en odómetro o litros de un movimiento de este mes">
+                                <AlertTriangle className="w-3 h-3" />{consumoReal.toFixed(0)}
+                              </span>
+                            : <span className="text-emerald-700">{consumoReal.toFixed(2)}</span>
+                          : sinCierre
+                            ? pendienteIntermedio
+                              ? <span
+                                  className="inline-flex items-center gap-1 text-amber-600 font-semibold cursor-help"
+                                  title={
+                                    `Mes intermedio sin km/L calculable.\n` +
+                                    `${fillsSinConsumoReal.length} carga${fillsSinConsumoReal.length !== 1 ? 's' : ''} sin carga anterior con odómetro registrado:\n` +
+                                    fillsSinConsumoReal.map(m => `  · ${m.fecha}  odo ${m.odometro?.toLocaleString()} km  ${m.litros?.toFixed(1)} L`).join('\n') +
+                                    `\n\nCausa probable: la carga inmediatamente anterior a este mes no tiene odómetro registrado.\n` +
+                                    `Solución: registre el odómetro en esa carga previa (Movimientos → Editar) y el km/L aparecerá automáticamente.`
+                                  }
+                                >
+                                  <AlertTriangle className="w-3 h-3" />pend.
+                                </span>
+                              : <span className="inline-flex items-center gap-1 text-slate-400" title="Pendiente: el km/L se calculará cuando se registre la siguiente carga del vehículo (necesita el odómetro de cierre del tramo).">
+                                  <Clock className="w-3 h-3" />pend.
+                                </span>
+                            : <span className="text-slate-300">—</span>
+                        }
+                      </td>
+                    )}
+                    {!esEquipoConsumidor && monthlyStats.some(m => m.nivelCierre != null) && (
+                      <td className="py-2 text-right tabular-nums">
+                        {nivelCierre != null ? (
+                          <span
+                            className={`font-semibold ${nivelCierreEsExacto ? 'text-sky-600' : 'text-sky-400'}`}
+                            title={nivelCierreEsExacto
+                              ? 'Dato exacto: nivel registrado al inicio de la siguiente carga'
+                              : 'Estimado: nivel + litros de la última carga del mes (antes del consumo posterior)'}
+                          >
+                            {!nivelCierreEsExacto && '≈ '}{nivelCierre.toFixed(1)} L
+                          </span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                    )}
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {monthlyStats.some(m => m.consumoAnomalo) && (
+            <div className="mt-3 flex items-start gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2 text-xs text-red-700 dark:text-red-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>Los meses con <strong>⚠</strong> tienen un km/L superior a 200, lo que es físicamente imposible para cualquier vehículo. Esto indica un error en los datos: litros casi nulos o un odómetro con salto incorrecto en algún movimiento de ese mes. Revisá los movimientos del mes marcado en el módulo de Movimientos.</span>
+            </div>
+          )}
+          {monthlyStats.some((m, idx) => m.sinCierre && idx === 0) && (
+            <div className="mt-3 flex items-start gap-2 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+              <Clock className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
+              <span><strong>pend.</strong> — el km/L del mes más reciente se calcula cuando se registre la siguiente carga del vehículo (necesita el odómetro de cierre del tramo). Es normal mientras no haya una carga posterior.</span>
+            </div>
+          )}
+          {monthlyStats.some((m, idx) => m.sinCierre && idx > 0) && (
+            <div className="mt-2 flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2 text-xs text-amber-800 dark:text-amber-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                <strong>⚠ pend. en mes intermedio</strong> — hay cargas con odómetro pero el km/L no puede calcularse
+                porque la carga inmediatamente anterior a ese mes no tiene odómetro registrado. <br />
+                <strong>Cómo corregirlo:</strong> registre el odómetro en la carga anterior al mes marcado
+                (en <em>Movimientos → Editar</em>); el km/L aparecerá automáticamente sin necesidad de tocar
+                ningún otro registro. Pase el cursor sobre <strong>⚠ pend.</strong> en la fila para ver
+                qué cargas específicas no tienen punto de partida.
+              </span>
+            </div>
+          )}
+          {monthlyStats.some(m => m.odoInconsistente) && (
+            <div className="mt-2 flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>Los meses marcados en amarillo tienen una inconsistencia en el odómetro: el valor final registrado es menor al valor inicial del período, lo que impide calcular km recorridos. Esto suele deberse a un error de carga de datos. Revisá los registros de esos meses.</span>
+            </div>
+          )}
+          {(() => {
+            const totalLitros = monthlyStats.reduce((s, m) => s + m.litros, 0);
+            const totalMonto  = monthlyStats.reduce((s, m) => s + m.monto, 0);
+            const totalCargas = monthlyStats.reduce((s, m) => s + m.cargas, 0);
+            const valsKml = monthlyStats.filter(m => m.consumoReal != null && !m.consumoAnomalo);
+            const promKml = valsKml.length > 0 ? valsKml.reduce((s, m) => s + m.consumoReal, 0) / valsKml.length : null;
+            return (
+              <div className="pt-3 border-t border-slate-100 dark:border-slate-700 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <p className="text-slate-400 mb-0.5">Total litros</p>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{totalLitros.toFixed(1)} L</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 mb-0.5">Total monto</p>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{formatMonto(totalMonto)}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 mb-0.5">Total cargas</p>
+                    <p className="font-bold text-slate-700 dark:text-slate-200">{totalCargas}</p>
+                  </div>
+                  {!esEquipoConsumidor && (
+                    <div>
+                      <p className="text-slate-400 mb-0.5">km/L promedio</p>
+                      <p className="font-bold text-emerald-700">{promKml != null ? promKml.toFixed(2) : '—'}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+    )}
+    </>
   );
 }
 

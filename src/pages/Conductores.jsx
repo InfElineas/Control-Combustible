@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Plus, Pencil, Power, Trash2, User, AlertTriangle, CreditCard } from 'lucide-react';
 import ConfirmDialog from '@/components/ui-helpers/ConfirmDialog';
 import { computeChoferDelMes, getMonthOptionsFromMovimientos } from '@/lib/fuel-analytics';
+import { useUserRole } from '@/components/ui-helpers/useUserRole';
 
 const emptyForm = {
   nombre: '', ci: '', telefono: '', email: '',
@@ -32,6 +33,7 @@ function getLicenciaStatus(vencimiento) {
 }
 
 export default function Conductores() {
+  const { canManageConductores, canDelete } = useUserRole();
   const queryClient = useQueryClient();
   const { data: conductores = [] } = useQuery({ queryKey: ['conductores'], queryFn: () => base44.entities.Conductor.list() });
   const { data: vehiculos = [] } = useQuery({ queryKey: ['vehiculos'], queryFn: () => base44.entities.Vehiculo.list() });
@@ -110,9 +112,11 @@ export default function Conductores() {
               {opcionesMes.map(opt => <SelectItem key={opt.key} value={opt.key}>{opt.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Button size="sm" className="gap-1.5 bg-sky-600 hover:bg-sky-700" onClick={() => { setForm(emptyForm); setEditing(null); setDialogOpen(true); }}>
-            <Plus className="w-4 h-4" /> Nuevo
-          </Button>
+          {canManageConductores && (
+            <Button size="sm" className="gap-1.5 bg-sky-600 hover:bg-sky-700" onClick={() => { setForm(emptyForm); setEditing(null); setDialogOpen(true); }}>
+              <Plus className="w-4 h-4" /> Nuevo
+            </Button>
+          )}
         </div>
       </div>
 
@@ -180,13 +184,17 @@ export default function Conductores() {
                     {c.area_centro && <span>{c.area_centro}</span>}
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(c)}><Power className={`w-3.5 h-3.5 ${c.activo ? 'text-emerald-500' : 'text-slate-300'}`} /></Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => setConfirmAction({ id: c.id, title: 'Eliminar conductor', desc: `¿Eliminar a "${c.nombre}"?` })}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
+                {canManageConductores && (
+                  <div className="flex gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(c)}><Pencil className="w-3.5 h-3.5" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(c)}><Power className={`w-3.5 h-3.5 ${c.activo ? 'text-emerald-500' : 'text-slate-300'}`} /></Button>
+                    {canDelete && (
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-red-500" onClick={() => setConfirmAction({ id: c.id, title: 'Eliminar conductor', desc: `¿Eliminar a "${c.nombre}"?` })}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           );

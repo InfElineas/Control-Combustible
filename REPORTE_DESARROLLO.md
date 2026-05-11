@@ -1,7 +1,7 @@
 # Reporte de Desarrollo — Sistema de Control de Combustible
 
-**Fecha de emisión:** 07 de mayo de 2026  
-**Versión:** `main` · commit `1cbf9a6`  
+**Fecha de emisión:** 07 de mayo de 2026 (actualización continua)  
+**Versión:** `main` · commit `1cbf9a6` + sesión en curso  
 **Plataforma:** React 18 + Vite 6 + Supabase  
 
 ---
@@ -427,9 +427,116 @@ WHERE tipo_viaje IS NULL;
 
 ---
 
-### 3.5 Centro de ayuda (`/Ayuda`)
+### 3.5 Corrección de odómetro en vehículos abastecidos por DESPACHO
 
-**Commit:** `1cbf9a6`  
+**Commit:** sesión en curso  
+**Archivo:** `src/components/dashboard/ConsumidoresPorTipo.jsx`
+
+#### Problema detectado
+
+Las tarjetas del Dashboard para ciertos vehículos (ej. Mitsubishi Fuso) mostraban "—" en los campos de odómetro, km recorridos y consumo real pese a tener registros de DESPACHO con odómetro.
+
+#### Causa raíz
+
+La variable `comprasConOdo` se derivaba únicamente de `compras` (movimientos `tipo === 'COMPRA'`), ignorando completamente los `despachosRecibidos`, que también pueden llevar odómetro.
+
+#### Corrección aplicada
+
+```javascript
+// Antes:
+const comprasConOdo = compras.filter(m => m.odometro != null).sort(…);
+
+// Después:
+const abastecimientosConOdo = [...compras, ...despachosRecibidos]
+  .filter(m => m.odometro != null)
+  .sort((a, b) => (b.odometro || 0) - (a.odometro || 0));
+```
+
+Se aplicó la misma corrección a `indiceConsumoRealMes`, que ahora incluye `despachosRecibidosMes` en el cálculo del promedio de km/L.
+
+---
+
+### 3.6 Corrección de reportes: incluir DESPACHO en métricas de consumo
+
+**Commit:** sesión en curso  
+**Archivos:** `src/components/reportes/ReporteVehiculos.jsx`, `src/components/reportes/ReporteConsumo.jsx`
+
+#### Regla de negocio consolidada
+
+| Métrica | Tipos incluidos | Justificación |
+|---|---|---|
+| Litros consumidos, cargas, odómetro, km/L | `COMPRA` + `DESPACHO` | El combustible llega al vehículo por ambas vías |
+| Monto / gasto financiero | Solo `COMPRA` | El DESPACHO es transferencia interna sin precio externo directo |
+
+Esta regla ya se aplicaba en `ConsumidoresPorTipo.jsx` y `Alertas.jsx`. Los reportes estaban pendientes.
+
+#### ReporteVehiculos.jsx — corrección
+
+```javascript
+// Antes: solo COMPRA → vehículos abastecidos solo por DESPACHO no aparecían
+const movs = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
+
+// Después:
+const movsAbast  = movimientos.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id);
+const movsCompra = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
+const litros = movsAbast.reduce((s, m) => s + (m.litros || 0), 0);
+const monto  = movsCompra.reduce((s, m) => s + (m.monto  || 0), 0);
+```
+
+El desglose por combustible (`porComb`) también fue dividido: litros acumulados desde `movsAbast`, monto acumulado desde `movsCompra`.
+
+#### ReporteConsumo.jsx — corrección
+
+```javascript
+// Antes: solo COMPRA → litrosTotal excluía DESPACHO
+const movsCompra  = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
+const litrosTotal = movsCompra.reduce((s, m) => s + (m.litros || 0), 0);
+
+// Después:
+const movsAbast   = movimientos.filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id);
+const movsCompra  = movimientos.filter(m => m.tipo === 'COMPRA' && m.consumidor_id === c.id);
+const litrosTotal = movsAbast.reduce((s, m)  => s + (m.litros || 0), 0);
+const montoTotal  = movsCompra.reduce((s, m) => s + (m.monto  || 0), 0);
+const cargas      = movsAbast.length;
+```
+
+El cálculo de `consumoUltimo`, `consumoPromedio` y `historial` ya usaban COMPRA + DESPACHO correctamente (línea 39 de la versión anterior) — esos no necesitaron corrección.
+
+---
+
+### 3.7 Desglose mensual de consumo por vehículo
+
+**Commit:** sesión en curso  
+**Archivo:** `src/components/dashboard/ConsumidoresPorTipo.jsx`
+
+#### Descripción
+
+Cada tarjeta de vehículo o equipo en el Dashboard ahora incluye el botón **«Ver detalles por mes»**, que abre un modal con el historial de consumo desglosado mes a mes. Aparece cuando el consumidor tiene movimientos en 2 o más meses distintos.
+
+#### Datos mostrados en el modal
+
+| Columna | Cálculo | Fuente |
+|---|---|---|
+| Mes | Nombre localizado | — |
+| Cargas | Número de movimientos del mes | COMPRA + DESPACHO |
+| Litros | Total abastecido | COMPRA + DESPACHO |
+| Monto | Gasto financiero | Solo COMPRA |
+| Odo. inicio | Max odómetro antes del inicio del mes | COMPRA + DESPACHO |
+| Odo. fin | Max odómetro dentro del mes | COMPRA + DESPACHO |
+| Km rec. | Odo. fin − Odo. inicio | Calculado |
+| km/L | Promedio de consumos_real del mes | COMPRA + DESPACHO |
+
+El pie del modal muestra totales acumulados de todos los meses y el km/L promedio global.
+
+#### Lógica de odómetro inicio
+
+Para calcular correctamente el odómetro de inicio de cada mes, el sistema busca el odómetro máximo registrado en cualquier movimiento **anterior** al mes en cuestión. Esto garantiza que el "inicio" refleje la posición real del vehículo al arrancar ese mes, no el primero del mes con datos.
+
+---
+
+### 3.8 Centro de ayuda (`/Ayuda`) — actualizado
+
+**Commits:** `1cbf9a6` (implementación), sesión en curso (actualización de contenido)  
 **Archivo:** `src/pages/Ayuda.jsx`
 
 Página de documentación completa del sistema, accesible para **todos los roles**.
@@ -445,17 +552,17 @@ Página de documentación completa del sistema, accesible para **todos los roles
 |---|---|
 | Introducción | Flujo general, tipos de movimiento, roles de usuario |
 | Movimientos | COMPRA vs DESPACHO, campos, fórmula km/L, filtros, acceso directo desde alertas |
-| Dashboard | KPIs, cálculo de saldo, fórmula de desviación de consumo, alertas críticas |
-| Consumidores | Tipos, cálculo de stock de reservas, indicadores por vehículo |
+| Dashboard | KPIs (Gasto, Litros comprados, Consumidores, Consumo crítico), fórmula de desviación, filtro de período, botón «Ver por mes» |
+| Consumidores | Tipos, cálculo de stock de reservas, tabla de indicadores con fuentes de datos, desglose mensual por vehículo |
 | Finanzas | Tarjetas corporativas, fórmula de saldo, explicación de compras directas vs. DESPACHO |
 | Alertas | Fórmula de desviación, umbrales, historial gráfico, notificación por email |
-| Reportes | Reporte de Vehículos, Reporte de Consumo, barra de capacidad |
+| Reportes | Reporte de Consumidores (COMPRA+DESPACHO), Reporte de Consumo con km/L, regla de negocio consolidada |
 | Rutas | Tipos de viaje, catálogo, estadísticas, relación con combustible |
 | Conductores | Campos, conductor del mes |
 | Catálogos | Parámetros técnicos, precios vigentes, fórmula de precio vigente |
 | Configuración | Gestión de precios, importación masiva |
 | Administración | Roles, audit log, trazabilidad de eliminaciones |
-| Glosario | 19 términos definidos (COMPRA, DESPACHO, km/L, saldo, umbral, etc.) |
+| Glosario | Términos técnicos definidos (COMPRA, DESPACHO, km/L, saldo, umbral, etc.) |
 
 #### Características de la UI
 
@@ -466,9 +573,153 @@ Página de documentación completa del sistema, accesible para **todos los roles
 - Fórmulas en bloque de código monoespacio
 - Scroll al inicio al cambiar de sección
 
+### 3.9 Bug: discrepancia entre «Stock en reserva» (Dashboard) y «Stock actual» (sección RESERVA)
+
+**Archivo:** `src/pages/Dashboard.jsx`  
+**Síntoma:** Para Gasolina Regular, el Dashboard mostraba 326 L (Stock en reserva) mientras la tarjeta de reserva mostraba 138 L (Stock actual). Diesel coincidía correctamente (130 L = 130 L).
+
+#### Causa raíz
+
+Ambos cálculos usan lógica distinta para los despachos:
+
+| | Dashboard `litrosEnTanqueEstimado` | ConsumidoresPorTipo `stockActual` |
+|---|---|---|
+| Despachos (salidas) | `tipo=DESPACHO AND combustible_nombre='...' AND consumidor_origen_id EN reservas` | `tipo=DESPACHO AND consumidor_origen_id = este_tanque` |
+
+Si algún DESPACHO desde la reserva tiene `combustible_nombre` nulo o con nombre distinto al exacto del catálogo, el Dashboard **no lo contabiliza como salida**, inflando el stock estimado. ConsumidoresPorTipo no filtra por nombre de combustible, por lo que siempre es correcto.
+
+#### Fix aplicado
+
+`litrosEnTanqueEstimado` se calcula ahora **tanque por tanque**, contando ALL despachos por `consumidor_origen_id` sin requerir `combustible_nombre`:
+
+```javascript
+const reservaTankIdsParaCombustible = new Set([
+  ...comprasReservaHistoricas.map(m => m.consumidor_id).filter(Boolean),
+  ...consumidores.filter(c => consumidoresReservaIds.has(c.id) && obtenerLitrosInicialesConsumidor(...) > 0).map(c => c.id),
+]);
+const litrosEnTanqueEstimado = Math.max(0,
+  [...reservaTankIdsParaCombustible].reduce((total, tankId) => {
+    const ini      = obtenerLitrosInicialesConsumidor(tank, combustibleIdRef, nombreCombustible);
+    const entradas = comprasReservaHistoricas.filter(m => m.consumidor_id === tankId).reduce(...);
+    const salidas  = movimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === tankId).reduce(...);
+    return total + ini + entradas - salidas;
+  }, 0)
+);
+```
+
+Esto es idéntico a `stockActual` en ConsumidoresPorTipo: la fuente de verdad es el ID del tanque, no el nombre del combustible en el movimiento.
+
 ---
 
-## 4. Arquitectura de roles — Resumen actualizado
+### 3.10 Descomposición del saldo final en Dashboard
+
+**Archivos:** `src/pages/Dashboard.jsx`
+
+Cuando en el período existen compras a reserva interna **y** compras directas a vehículos (sin pasar por reserva), el card de «Resumen por combustible» ahora muestra dos niveles de detalle adicional:
+
+#### Sub-desglose bajo «+ Compras»
+
+Aparece únicamente cuando `litrosComprasReservaMes > 0` **y** `litrosCompras − litrosComprasReservaMes > 0`:
+
+```
+↳ A reserva interna        XX.X L
+↳ Compra directa vehículos YY.Y L
+```
+
+#### Descomposición bajo «Saldo final»
+
+Aparece cuando hay stock estimado en reserva o compras directas en el período:
+
+```
+🛢 Stock en reserva               ZZ.Z L  ≈ $ 0,00
+🚗 Compra directa (ya en vehículos) YY.Y L
+```
+
+Las dos sub-líneas bajo «Saldo final» **siempre suman exactamente el saldo final**:
+
+- **🛢 En reserva (tanques)** = `litrosEnTanqueEstimado` — stock físico actual en tanques de la empresa
+- **🚗 Ya en vehículos** = `litrosSaldoFinal − litrosEnTanqueEstimado` — porción del saldo ya distribuida a vehículos
+
+El sub-desglose bajo «+ Compras» (separado) muestra cómo ingresó el combustible: `litrosComprasReservaMes` y `litrosCompras − litrosComprasReservaMes`. Esas dos líneas suman el total de compras del período, no el saldo.
+
+Solo se renderiza cuando `litrosSaldoFinal > 0 && litrosEnTanqueEstimado > 0`.
+
+---
+
+### 3.10 Advertencia de odómetro inconsistente en desglose mensual
+
+**Archivo:** `src/components/dashboard/ConsumidoresPorTipo.jsx`
+
+El `monthlyStats` ahora calcula y expone el flag `odoInconsistente`:
+
+```javascript
+const odoInconsistente = odoInicioMes != null && odoFinMes != null && odoFinMes < odoInicioMes;
+return { ..., odoInconsistente };
+```
+
+#### Comportamiento en la tabla «Ver detalles por mes»
+
+| Condición | Visualización |
+|---|---|
+| `odoInconsistente = false` | Fila blanca normal |
+| `odoInconsistente = true` | Fila con fondo **ámbar** |
+| Odo. inicio / Odo. fin (inconsistente) | Texto **ámbar negrita** |
+| Km rec. (inconsistente) | `⚠ —` (icono AlertTriangle + guion, en ámbar) |
+| Nota al pie de la tabla | Banner ámbar con explicación cuando algún mes tiene la bandera activa |
+
+#### Causa raíz (inconsistencia)
+
+Ocurre cuando el odómetro ingresado en una carga del mes es **inferior** al máximo histórico anterior. El sistema usa el máximo odómetro antes del mes como `odoInicioMes`; si el `odoFinMes` del mes resulta menor, los km serían negativos, lo que físicamente es imposible. La solución correcta es revisar y corregir el movimiento con el odómetro erróneo en el módulo de Movimientos.
+
+#### Segundo caso: km/L «pend.» — tramo aún no cerrado
+
+Flag `sinCierre`: `conConsumo.length === 0 && conOdo.length > 0 && !odoInconsistente`
+
+```javascript
+const sinCierre = conConsumo.length === 0 && conOdo.length > 0 && !odoInconsistente;
+```
+
+| Estado km/L | Condición | Visualización |
+|---|---|---|
+| Valor numérico | `consumoReal != null` | Verde `XX.XX` |
+| Tramo pendiente | `sinCierre = true` | `🕐 pend.` (slate-400, con tooltip) |
+| Sin datos | `consumoReal == null && !sinCierre` | `—` (slate-300) |
+
+El `consumo_real` se calcula **al registrar la siguiente carga** (usa el delta de odómetros). Por eso el mes más reciente suele mostrar «pend.»: las cargas tienen odómetro registrado, pero el tramo no se cierra hasta la próxima carga. Es comportamiento esperado; no requiere intervención. El banner de nota aparece bajo la tabla cuando algún mes tiene `sinCierre = true`.
+
+---
+
+## 4. Regla de negocio consolidada — COMPRA vs DESPACHO
+
+Esta regla aplica de forma **uniforme** en todo el sistema desde la sesión 07/05/2026:
+
+| Métrica / Cálculo | Tipos de movimiento incluidos |
+|---|---|
+| Litros abastecidos / consumidos | `COMPRA` + `DESPACHO` |
+| Número de cargas (#Cargas, Eventos) | `COMPRA` + `DESPACHO` |
+| Odómetro / Km recorridos / km/L | `COMPRA` + `DESPACHO` (ambos pueden registrar odómetro) |
+| Alertas de consumo (desviación de rendimiento) | `COMPRA` + `DESPACHO` |
+| Stock de reserva / tanque | `COMPRA` entrada, `DESPACHO` salida |
+| Monto / Gasto financiero | Solo `COMPRA` (DESPACHO = transferencia interna, sin precio directo) |
+| Saldo de tarjeta corporativa | Solo `COMPRA` |
+
+**Archivos donde la regla está aplicada:**
+
+| Archivo | Estado |
+|---|---|
+| `src/components/dashboard/ConsumidoresPorTipo.jsx` | ✅ Correcto |
+| `src/components/reportes/ReporteVehiculos.jsx` | ✅ Correcto (fix sesión 07/05) |
+| `src/components/reportes/ReporteConsumo.jsx` | ✅ Correcto (fix sesión 07/05) |
+| `src/pages/Alertas.jsx` | ✅ Correcto (fix commit dda1e52) |
+| `src/pages/Dashboard.jsx` | ✅ Correcto |
+| `src/lib/fuel-analytics.js` | ✅ Correcto |
+| `src/components/alertas/GraficoConsumoHistorico.jsx` | ✅ Correcto |
+| `src/components/reportes/LogConsumidorMovimientosModal.jsx` | ✅ Correcto |
+| `src/components/movimientos/ConsumidorDetalleModal.jsx` | ✅ Correcto |
+
+---
+
+## 4c. Arquitectura de roles — Resumen actualizado
 
 | Rol | Movimientos | Finanzas | Catálogos | Alertas | Rutas | Reportes | Admin | Ayuda |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -483,8 +734,9 @@ Página de documentación completa del sistema, accesible para **todos los roles
 
 | Commit | Fecha | Descripción |
 |---|---|---|
+| sesión en curso | 07/05/2026 | Fix ReporteVehiculos+ReporteConsumo DESPACHO, desglose mensual Dashboard, actualización Ayuda |
 | `1cbf9a6` | 07/05/2026 | Centro de ayuda + tipos de viaje en Rutas |
-| `dda1e52` | 07/05/2026 | Audit log, módulo Rutas, fix COMPRA/DESPACHO, URL filtering |
+| `dda1e52` | 07/05/2026 | Audit log, módulo Rutas, fix COMPRA/DESPACHO en Dashboard+Alertas, URL filtering |
 | `323313d` | 26/04/2026 | UI improvements, role fixes, dashboard overhaul |
 | `7c04f4c` | 26/04/2026 | Módulo Finanzas, fix acceso rol económico |
 | `95b1ca9` | 26/04/2026 | Security hardening, feature completions |
@@ -567,6 +819,21 @@ WHERE tipo_viaje IS NULL;
 | Rol `conductor` para acceso móvil limitado al vehículo propio | Media | Arquitectura ya preparada (ver punto 1.9) |
 | Integración con plataforma GPS para km automáticos | Baja | Requiere identificar API de la plataforma en uso (ver punto 1.10 Opción B) |
 
+### ✅ Completadas en sesión 07/05/2026
+
+| Tarea | Resultado |
+|---|---|
+| Fix odómetro en vehículos abastecidos solo por DESPACHO | Implementado en `ConsumidoresPorTipo.jsx` |
+| Fix `ReporteVehiculos.jsx`: incluir DESPACHO en litros/cargas | Implementado |
+| Fix `ReporteConsumo.jsx`: `litrosTotal` y `cargas` incluyen DESPACHO | Implementado |
+| Desglose mensual «Ver detalles por mes» en tarjetas Dashboard | Implementado en `ConsumidoresPorTipo.jsx` |
+| Actualizar `/Ayuda` con nomenclatura y fórmulas correctas | Implementado: KPIs, regla COMPRA+DESPACHO, desglose mensual documentados |
+| Bug: `litrosEnTanqueEstimado` discrepaba con `stockActual` por filtro combustible_nombre en DESPACHO | Corregido en `Dashboard.jsx` — cálculo por tanque sin filtro combustible en salidas (sección 3.9) |
+| Descomposición saldo final Dashboard (🛢 reserva / 🚗 directa) | Implementado en `Dashboard.jsx` (sección 3.10) |
+| Advertencia ⚠ odómetro inconsistente en desglose mensual | Implementado en `ConsumidoresPorTipo.jsx` (sección 3.10) |
+| Documentar ambas mejoras en `/Ayuda` y `REPORTE_DESARROLLO.md` | Implementado |
+| Actualizar `REPORTE_DESARROLLO.md` | Este documento |
+
 ---
 
-*Documento actualizado el 07/05/2026 · Sistema de Control de Combustible · InfElineas*
+*Documento actualizado el 07/05/2026 (sesión en curso) · Sistema de Control de Combustible · InfElineas*

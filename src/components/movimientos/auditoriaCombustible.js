@@ -39,10 +39,25 @@ export const calcularAuditoriaCompra = ({
   capacidadTanque,
   litrosIniciales = 0,
   excludeMovimientoId,
+  nivelTanqueActual,
 }) => {
   const litros = toNumber(litrosAbastecidos);
   if (!consumidorId || !combustibleId || !fecha || !litros || litros <= 0) {
     return { estado: AUDITORIA_ESTADO.SIN_ESTIMACION };
+  }
+
+  // When the operator provides a physical tank reading, use it directly as the baseline.
+  const nivelReal = toNumber(nivelTanqueActual);
+  if (nivelReal != null && nivelReal >= 0) {
+    const combustibleEstimadoPost = nivelReal + litros;
+    if (!capacidadTanque) {
+      return { estado: AUDITORIA_ESTADO.SIN_CAPACIDAD, remanenteAntes: nivelReal, combustibleEstimadoPost };
+    }
+    return {
+      estado: combustibleEstimadoPost > capacidadTanque ? AUDITORIA_ESTADO.EXCESO : AUDITORIA_ESTADO.OK,
+      remanenteAntes: nivelReal,
+      combustibleEstimadoPost,
+    };
   }
 
   const historico = movimientos.filter((m) => {

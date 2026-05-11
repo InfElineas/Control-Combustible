@@ -237,12 +237,12 @@ Ejemplo:
 
         <SubTitle>KPIs del mes</SubTitle>
         <TableDoc
-          headers={['Indicador', 'Qué mide', 'Cómo se calcula']}
+          headers={['Tarjeta', 'Qué mide', 'Cómo se calcula']}
           rows={[
-            ['Total comprado', 'Gasto total en combustible del período', 'Suma de monto de todos los movimientos COMPRA del período'],
-            ['Litros adquiridos', 'Volumen total de combustible comprado', 'Suma de litros de todos los COMPRA del período'],
-            ['Despachos internos', 'Transferencias desde reservas a consumidores', 'Cuenta de movimientos DESPACHO del período'],
-            ['Saldo estimado', 'Combustible disponible en reservas', 'Litros COMPRA − Litros DESPACHO (acumulado desde inicio)'],
+            ['Gasto combustible', 'Monto total pagado en combustible del período', 'Σ(monto COMPRA del período) — solo compras en surtidores externos con tarjeta'],
+            ['Litros comprados', 'Litros adquiridos externamente + litros despachados de reservas', 'Línea principal: Σ(litros COMPRA). Sublínea: Σ(litros DESPACHO) del período'],
+            ['Consumidores activos', 'Unidades de flota en operación', 'Cuenta de consumidores con el flag «activo» habilitado'],
+            ['Consumo crítico', 'Vehículos con rendimiento bajo el umbral crítico', 'Consumidores cuya desviación de km/L supera el umbral crítico configurado (por defecto 30%)'],
           ]}
         />
 
@@ -258,6 +258,20 @@ Saldo final     = Total disponible − Consumo
           <strong>Importante:</strong> las compras directas de vehículos (COMPRA) suman al "Total disponible"
           pero, como el vehículo consume directamente sin pasar por reserva, no generan un DESPACHO
           de salida. Esto es correcto operativamente.
+        </Callout>
+        <Callout type="info" title="Descomposición del saldo final">
+          Cuando hay reservas internas, el <strong>«Saldo final»</strong> se desglosa automáticamente
+          en dos sub-líneas que suman exactamente ese total:
+          <ul className="mt-1.5 space-y-0.5 list-none">
+            <li>🛢 <strong>En reserva (tanques)</strong> — litros estimados actualmente en los tanques
+              físicos de la empresa (entradas históricas menos despachos acumulados al momento actual).</li>
+            <li>🚗 <strong>Ya en vehículos</strong> — diferencia entre el saldo total y el stock en
+              reserva: combustible que ya fue distribuido a los vehículos (compras directas en surtidor
+              externo, menos lo que esos vehículos hayan redistribuido como cisterna).</li>
+          </ul>
+          <strong>Las dos líneas siempre suman el saldo final.</strong> El desglose bajo «+ Compras» (separado)
+          muestra cómo ingresó el combustible al sistema: «↳ A reserva interna» y «↳ Compra directa
+          vehículos» (suma = total compras del período).
         </Callout>
 
         <SubTitle>Alertas críticas</SubTitle>
@@ -278,11 +292,16 @@ Si Desviación < Umbral alerta                    → NORMAL   (verde)`}
 
         <SubTitle>Filtro de período</SubTitle>
         <P>
-          El selector de mes en el Dashboard filtra todos los datos del resumen y las tarjetas de
-          combustible. Al seleccionar "Todo" se muestran los datos históricos completos.
-          Las alertas de consumo siempre se calculan sobre el último movimiento disponible,
-          independientemente del filtro.
+          El selector de mes en el Dashboard filtra todos los KPIs, el resumen por combustible
+          y las tarjetas de consumidores. Al seleccionar "Todo" se muestran los datos históricos completos.
+          Las alertas de consumo se calculan sobre el último movimiento disponible (COMPRA o DESPACHO)
+          del vehículo, independientemente del filtro de mes seleccionado.
         </P>
+        <Callout type="tip" title="Ver consumo mes a mes por vehículo">
+          Cada tarjeta de vehículo tiene el botón <strong>«Ver detalles por mes»</strong> que abre
+          una tabla con el desglose histórico completo: cargas, litros, monto, odómetro y km/L separados
+          por mes. Aparece cuando el vehículo tiene actividad en dos o más meses distintos.
+        </Callout>
       </>
     ),
   },
@@ -319,19 +338,87 @@ Si Desviación < Umbral alerta                    → NORMAL   (verde)`}
 
         <SubTitle>Indicadores de un consumidor (vehículo)</SubTitle>
         <TableDoc
-          headers={['Indicador', 'Descripción']}
+          headers={['Indicador', 'Descripción', 'Fuente de datos']}
           rows={[
-            ['Total abastecido', 'Suma de litros recibidos (COMPRA + DESPACHO) en el período seleccionado.'],
-            ['Último abastecimiento', 'Fecha y litros de la carga más reciente.'],
-            ['Odómetro inicio / fin', 'Valores mínimo y máximo de odómetro registrados en el período.'],
-            ['Km recorridos', 'Odómetro fin − Odómetro inicio del período.'],
-            ['Consumo real (km/L)', 'Promedio de los consumos reales registrados en las cargas del período.'],
-            ['Consumo fabricante (km/L)', 'Valor de referencia configurado en el catálogo del vehículo.'],
-            ['Días sin abastecimiento', 'Días transcurridos desde la última carga. Genera alerta si supera el umbral.'],
+            ['Total abastecido', 'Litros recibidos en el período seleccionado.', 'COMPRA + DESPACHO recibidos'],
+            ['Gasto del período', 'Costo financiero del período.', 'Solo COMPRA (DESPACHO es transferencia interna)'],
+            ['Último abastecimiento', 'Fecha y litros de la carga más reciente.', 'COMPRA o DESPACHO, el más reciente'],
+            ['Odo. inicio / Odo. final', 'Primera y última lectura de odómetro entre las dos cargas más recientes con datos.', 'COMPRA + DESPACHO con odómetro registrado'],
+            ['Km recorridos', 'Odo. final − Odo. inicio entre las dos lecturas más recientes.', 'Diferencia de los dos odómetros más altos'],
+            ['Consumo real (km/L)', 'Promedio de los consumos reales del período.', 'COMPRA + DESPACHO con consumo_real calculado'],
+            ['Consumo fabricante (km/L)', 'Referencia configurada en el catálogo del vehículo.', 'Tabla consumidores → datos_vehiculo'],
+            ['Días sin abastecimiento', 'Días desde la última carga (COMPRA o DESPACHO).', 'Fecha del movimiento más reciente'],
           ]}
         />
 
-        <Callout type="tip" title="Columna «DESPACHO» en el detalle de un consumidor">
+        <SubTitle>Desglose histórico por mes («Ver detalles por mes»)</SubTitle>
+        <P>
+          El botón <strong>«Ver detalles por mes»</strong> aparece en cada tarjeta de vehículo o equipo
+          cuando tiene actividad registrada en dos o más meses distintos. Abre una tabla con el consumo
+          completo desglosado mes a mes.
+        </P>
+        <TableDoc
+          headers={['Columna', 'Qué muestra', 'Fuente']}
+          rows={[
+            ['Mes', 'Nombre del mes y año.', '—'],
+            ['Cargas', 'Número total de movimientos recibidos ese mes.', 'COMPRA + DESPACHO'],
+            ['Litros', 'Total de litros abastecidos ese mes.', 'COMPRA + DESPACHO'],
+            ['Monto', 'Gasto financiero ese mes.', 'Solo COMPRA'],
+            ['Odo. inicio', 'Odómetro máximo registrado antes del inicio del mes (punto de referencia de partida).', 'COMPRA + DESPACHO'],
+            ['Odo. fin', 'Odómetro máximo registrado dentro del mes.', 'COMPRA + DESPACHO'],
+            ['Km rec.', 'Odo. fin − Odo. inicio. Queda vacío (⚠) si el odómetro es inconsistente.', 'Calculado'],
+            ['km/L', 'Promedio de consumos reales del mes. Muestra «pend.» si el tramo no está cerrado, o «⚠» en rojo si el valor supera 200 km/L (dato erróneo).', 'COMPRA + DESPACHO con consumo_real'],
+            ['En tanque', 'Litros físicos en el tanque al cierre del mes. Columna visible solo cuando alguna carga tiene nivel_tanque registrado. Dato exacto (azul) o estimado con ≈ (gris).', 'nivel_tanque del movimiento'],
+          ]}
+        />
+        <P>El pie del panel muestra totales acumulados y, cuando hay datos suficientes, una estimación del combustible actualmente en el tanque del vehículo.</P>
+        <Callout type="tip" title="Columna «En tanque» — nivel físico registrado">
+          La columna <strong>«En tanque»</strong> aparece automáticamente en la tabla cuando alguna
+          carga del vehículo tiene el campo <code>nivel_tanque</code> registrado. Muestra cuántos
+          litros había físicamente en el tanque al cierre de cada mes:
+          <ul className="mt-1.5 space-y-0.5 list-none">
+            <li><strong>Azul (dato exacto):</strong> el <code>nivel_tanque</code> de la primera carga
+              del mes siguiente — es el nivel exacto al llegar a esa carga, es decir, el nivel real
+              al cierre del mes anterior.</li>
+            <li><strong>Gris con ≈ (estimado):</strong> solo para el mes más reciente, donde no hay
+              carga posterior. Se calcula como <code>nivel_tanque + litros</code> de la última carga
+              del mes (el nivel justo después de esa carga, antes del consumo posterior).</li>
+            <li><strong>— (sin datos):</strong> ninguna carga del mes ni del mes siguiente tiene
+              <code>nivel_tanque</code> registrado.</li>
+          </ul>
+          A diferencia de las estimaciones por km/L, este dato es <strong>físicamente correcto</strong>
+          y siempre respetará la capacidad del tanque del vehículo.
+        </Callout>
+        <Callout type="warning" title="km/L con ⚠ en rojo — valor atípico (dato erróneo)">
+          Si la columna km/L muestra un <strong>⚠ número en rojo</strong>, significa que el promedio
+          calculado supera los 200 km/L, lo cual es físicamente imposible para cualquier vehículo
+          terrestre. La causa más común es un movimiento de ese mes con:
+          <ul className="mt-1 space-y-0.5 list-disc list-inside">
+            <li><strong>Litros muy bajos o en 0</strong> al registrarse la carga (denomina el km/L).</li>
+            <li><strong>Salto de odómetro incorrecto</strong> (e.g., odómetro ingresado en metros en lugar de kilómetros).</li>
+          </ul>
+          El valor anómalo se excluye del km/L promedio global. Para corregirlo, localizá el movimiento
+          del mes marcado en el módulo de Movimientos y corregí el litros u odómetro mal ingresado.
+        </Callout>
+        <Callout type="info" title="km/L «pend.» — tramo aún no cerrado">
+          El km/L de un mes se muestra como <strong>pend.</strong> (con ícono de reloj) cuando el mes tiene
+          cargas con odómetro registrado, pero ninguna de ellas tiene <code>consumo_real</code> calculado.
+          Esto ocurre porque el km/L se calcula <em>al momento de la carga siguiente</em>: el sistema toma
+          la diferencia de odómetro entre la carga actual y la anterior. Si el vehículo aún no fue cargado
+          nuevamente después de ese mes, el tramo queda abierto y el rendimiento no puede calcularse.
+          Es el comportamiento normal para el mes más reciente. No requiere acción; se actualizará
+          automáticamente con la próxima carga registrada.
+        </Callout>
+        <Callout type="warning" title="Meses con odómetro inconsistente">
+          Si el <strong>Odo. fin</strong> de un mes es menor al <strong>Odo. inicio</strong> (es decir, el
+          odómetro «retrocedió»), la fila se resalta en <strong>amarillo</strong> y la columna «Km rec.»
+          muestra <strong>⚠ —</strong> en lugar de un número. Esto indica un error de carga: el valor ingresado
+          en alguna carga de ese mes es inferior a lecturas anteriores del mismo vehículo. El sistema
+          no inventa kilómetros negativos; simplemente deja el dato en blanco hasta que se corrija
+          el registro erróneo en el módulo de Movimientos.
+        </Callout>
+
+        <Callout type="tip" title="«DESPACHO» como origen">
           Cuando un vehículo aparece como <em>origen</em> de un DESPACHO (ej: un camión cisterna que
           abastece a otros), sus litros despachados se muestran por separado del combustible que él
           mismo ha recibido.
@@ -477,43 +564,53 @@ Clasificación:
       <>
         <P>
           El módulo de Reportes ofrece tres vistas analíticas del consumo de la flota,
-          filtradas por período (mes o historial completo).
+          filtrables por rango de fechas (campo «Desde» / «Hasta»).
+          Cuando no se establece ningún filtro se muestran todos los datos históricos disponibles.
         </P>
 
-        <SubTitle>Reporte de Vehículos</SubTitle>
+        <Callout type="info" title="Regla de datos en todos los reportes">
+          Para <strong>volumen consumido</strong> (litros, cargas, odómetro, km/L) se incluyen
+          tanto COMPRA como DESPACHO recibidos. Para <strong>valor financiero</strong> (monto, gasto)
+          solo se incluyen COMPRA, ya que los DESPACHO son transferencias internas sin costo externo directo.
+        </Callout>
+
+        <SubTitle>Reporte de Consumidores</SubTitle>
         <P>
-          Tabla y barra de ranking de consumidores ordenados por litros o monto. Muestra
-          el acumulado de compras directas (COMPRA) por vehículo en el período.
+          Ranking de todos los consumidores que recibieron combustible en el período,
+          ordenables por litros totales, monto o número de cargas.
         </P>
-        <Callout type="formula" title="Barra de capacidad (Cap: X L · Y%)">
+        <Callout type="formula" title="Cálculo por fila de consumidor">
           <Formula>
-{`Litros mostrados = Σ(litros COMPRA del consumidor en el período)
-Porcentaje       = MIN(100, litros / capacidad_tanque × 100)
+{`Litros totales = Σ(litros COMPRA) + Σ(litros DESPACHO recibidos) del período
+Monto total    = Σ(monto COMPRA) del período  ← DESPACHO no genera costo directo
 
-Si el % supera 100, la barra se muestra llena (100%) porque el acumulado
-histórico es mayor que la capacidad de un tanque — es normal para períodos largos.`}
+Barra de capacidad (si el consumidor tiene capacidad_tanque configurada):
+  Porcentaje = MIN(100 %, litros totales / capacidad_tanque × 100)
+
+Sin capacidad configurada → barra relativa al mayor consumidor del período.`}
           </Formula>
         </Callout>
         <Callout type="warning">
           El porcentaje en la barra <strong>no</strong> indica el nivel actual del tanque.
-          Indica cuántas veces se ha "llenado" el vehículo en relación a su capacidad
-          durante el período seleccionado.
+          Refleja el volumen acumulado en el período respecto a la capacidad nominal —
+          puede superar el 100 % en períodos largos o para consumidores de tanque pequeño.
         </Callout>
 
-        <SubTitle>Reporte de Consumo</SubTitle>
+        <SubTitle>Reporte de Consumo (km/L y rendimiento)</SubTitle>
         <P>
-          Análisis por consumidor con odómetro, km recorridos y rendimiento km/L.
-          Incluye solo consumidores con al menos una carga con odómetro registrado.
+          Análisis de eficiencia por consumidor con odómetro, km recorridos y rendimiento km/L.
+          Aparecen solo los consumidores con al menos un movimiento registrado en el período.
         </P>
         <TableDoc
-          headers={['Columna', 'Cálculo']}
+          headers={['Columna', 'Cálculo', 'Fuente']}
           rows={[
-            ['Litros totales', 'Σ(COMPRA + DESPACHO recibido) del consumidor en el período'],
-            ['Gasto total', 'Σ(monto COMPRA) del consumidor — las DESPACHO no tienen precio directo'],
-            ['Odómetro inicial', 'Mínimo odómetro registrado en el período'],
-            ['Odómetro final', 'Máximo odómetro registrado en el período'],
-            ['Km recorridos', 'Odo. final − Odo. inicial'],
-            ['Km/L promedio', 'Promedio de los consumos_real registrados en las cargas del período'],
+            ['Litros', 'Total de litros abastecidos en el período', 'COMPRA + DESPACHO recibidos'],
+            ['Monto', 'Gasto financiero del período', 'Solo COMPRA'],
+            ['Cargas', 'Cantidad de movimientos del período', 'COMPRA + DESPACHO'],
+            ['Ref (km/L)', 'Índice de consumo de referencia del vehículo', 'Catálogo consumidores'],
+            ['Prom (km/L)', 'Promedio de todos los consumos_real con odómetro registrado', 'COMPRA + DESPACHO'],
+            ['Último (km/L)', 'Consumo real del movimiento más reciente con odómetro', 'COMPRA + DESPACHO'],
+            ['Estado', 'Normal / Alerta / Crítico según desviación respecto a la referencia', 'Calculado'],
           ]}
         />
 

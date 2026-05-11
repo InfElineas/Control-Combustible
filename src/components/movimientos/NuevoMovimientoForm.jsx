@@ -241,8 +241,9 @@ export default function NuevoMovimientoForm({ onSuccess }) {
       litrosAbastecidos: litrosReales,
       capacidadTanque,
       litrosIniciales: consumidorSeleccionado?.litros_iniciales ?? 0,
+      nivelTanqueActual: form.nivel_tanque !== '' ? parseFloat(form.nivel_tanque) : undefined,
     });
-  }, [tipo, movimientos, form.consumidor_id, form.combustible_id, form.fecha, litrosReales, capacidadTanque, consumidorSeleccionado]);
+  }, [tipo, movimientos, form.consumidor_id, form.combustible_id, form.fecha, litrosReales, capacidadTanque, consumidorSeleccionado, form.nivel_tanque]);
 
   // Stock de un consumidor origen (para DESPACHO)
   const calcularStockConsumidor = (consumidorId, combustibleId) => {
@@ -308,9 +309,6 @@ export default function NuevoMovimientoForm({ onSuccess }) {
         } else if (ultimoOdometro != null && parseFloat(form.odometro) <= ultimoOdometro) {
           e.odometro = `Debe ser mayor al registro anterior: ${ultimoOdometro.toLocaleString()} km`;
         }
-      }
-      if (auditoriaCompra?.estado === AUDITORIA_ESTADO.EXCESO && capacidadTanque != null) {
-        e.litros = `Excede capacidad de tanque (${capacidadTanque.toFixed(2)} L) según estimación.`;
       }
     } else if (tipo === 'DESPACHO') {
       if (!form.consumidor_origen_id) e.consumidor_origen_id = 'Seleccione origen (reserva)';

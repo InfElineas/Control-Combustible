@@ -111,25 +111,62 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
       fecha: form.fecha,
       litrosAbastecidos: form.litros,
       capacidadTanque,
+      litrosIniciales: consumidorSeleccionado?.litros_iniciales ?? 0,
       excludeMovimientoId: movimiento?.id,
+      nivelTanqueActual: form.nivel_tanque !== '' && form.nivel_tanque != null ? parseFloat(form.nivel_tanque) : undefined,
     });
-  }, [movimiento?.tipo, movimiento?.id, movimientos, form.consumidor_id, form.combustible_id, form.fecha, form.litros, capacidadTanque]);
+  }, [movimiento?.tipo, movimiento?.id, movimientos, form.consumidor_id, form.combustible_id, form.fecha, form.litros, capacidadTanque, consumidorSeleccionado, form.nivel_tanque]);
 
   const updateMutation = useMutation({
-    mutationFn: (data) => base44.entities.Movimiento.update(movimiento.id, data),
+    mutationFn: async (data) => {
+      // Guardar el movimiento editado
+      const result = await base44.entities.Movimiento.update(movimiento.id, data);
+
+      // ── Cascada de odómetro ─────────────────────────────────────────────────
+      // Si se cambió el odómetro, recalcular km_recorridos y consumo_real del
+      // movimiento inmediatamente siguiente del mismo consumidor (el que usa este
+      // odo como punto de partida de su propio tramo).
+      if (data.odometro != null) {
+        const odoNuevo = data.odometro;
+        const consumidorId = data.consumidor_id ?? movimiento.consumidor_id;
+
+        // El siguiente es el movimiento con el odómetro más bajo que supere al editado,
+        // del mismo consumidor, con fecha >= a este movimiento.
+        const siguiente = movimientos
+          .filter(m =>
+            m.id !== movimiento.id &&
+            (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') &&
+            m.consumidor_id === consumidorId &&
+            m.odometro != null &&
+            m.odometro > odoNuevo
+          )
+          .sort((a, b) => a.odometro - b.odometro)[0];
+
+        if (siguiente) {
+          const kmSig = siguiente.odometro - odoNuevo;
+          const litrosSig = siguiente.litros ?? 0;
+          if (kmSig > 0 && litrosSig > 0) {
+            await base44.entities.Movimiento.update(siguiente.id, {
+              km_recorridos: kmSig,
+              consumo_real: kmSig / litrosSig,
+            });
+          }
+        }
+      }
+
+      return result;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['movimientos'] });
       toast.success('Movimiento actualizado');
       onClose();
     },
+    onError: (err) => {
+      toast.error(`Error al guardar: ${err?.message ?? 'Error desconocido'}`);
+    },
   });
 
   const handleSubmit = () => {
-    if (movimiento?.tipo === 'COMPRA' && auditoriaCompra?.estado === AUDITORIA_ESTADO.EXCESO && capacidadTanque != null) {
-      toast.error(`Inconsistencia detectada: supera capacidad de tanque (${capacidadTanque.toFixed(2)} L).`);
-      return;
-    }
-
     const tarjeta = tarjetas.find(t => t.id === form.tarjeta_id);
     const consumidor = consumidores.find(c => c.id === form.consumidor_id);
     const consumidorOrigen = consumidores.find(c => c.id === form.consumidor_origen_id);
@@ -137,7 +174,7 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
 
     const data = {
       fecha: form.fecha,
-      referencia: form.referencia || undefined,
+      referencia: form.referencia || null,
     };
 
     if (form.tarjeta_id && tarjeta) {
@@ -156,16 +193,15 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
       data.combustible_id = combustible.id;
       data.combustible_nombre = combustible.nombre;
     }
-    if (form.monto      !== '') data.monto      = parseFloat(form.monto);
-    if (form.litros     !== '') data.litros     = parseFloat(form.litros);
-    if (form.precio     !== '') data.precio     = parseFloat(form.precio);
+    if (form.monto        !== '') data.monto       = parseFloat(form.monto);
+    if (form.litros       !== '') data.litros      = parseFloat(form.litros);
+    if (form.precio       !== '') data.precio      = parseFloat(form.precio);
     if (form.nivel_tanque !== '') data.nivel_tanque = parseFloat(form.nivel_tanque);
 
     // Odómetro para vehículos (COMPRA o DESPACHO)
     if (!esEquipoConsumidor && form.odometro !== '') {
       const odoNuevo = parseFloat(form.odometro);
       data.odometro = odoNuevo;
-      // Recalcular km_recorridos y consumo_real si hay lectura anterior
       const prevConOdo = movimientos
         .filter(m =>
           m.id !== movimiento.id &&
@@ -186,13 +222,6 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
     // Horas de uso para equipos/generadores
     if (esEquipoConsumidor && form.horas_uso !== '') {
       data.horas_uso = parseFloat(form.horas_uso);
-    }
-
-    if (movimiento?.tipo === 'COMPRA') {
-      data.remanente_estimado_antes = auditoriaCompra?.remanenteAntes ?? null;
-      data.combustible_estimado_post = auditoriaCompra?.combustibleEstimadoPost ?? null;
-      data.capacidad_tanque = capacidadTanque;
-      data.auditoria_combustible_estado = auditoriaCompra?.estado || AUDITORIA_ESTADO.SIN_ESTIMACION;
     }
 
     updateMutation.mutate(data);
@@ -288,15 +317,40 @@ export default function EditarMovimientoModal({ movimiento, onClose }) {
               <Input type="number" step="0.01" value={form.litros} onChange={e => set('litros', e.target.value)} className="mt-1" />
             </div>
           )}
-          {tipo === 'COMPRA' && auditoriaCompra && (
-            <div className={`rounded-lg border p-2 text-xs space-y-1 ${
+          {tipo === 'COMPRA' && auditoriaCompra && auditoriaCompra.estado !== AUDITORIA_ESTADO.SIN_ESTIMACION && (
+            <div className={`rounded-lg border p-2.5 text-xs space-y-1.5 ${
               auditoriaCompra.estado === AUDITORIA_ESTADO.EXCESO
-                ? 'bg-red-50 border-red-200 text-red-700'
-                : 'bg-slate-50 border-slate-200 text-slate-700'
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : auditoriaCompra.estado === AUDITORIA_ESTADO.SIN_CAPACIDAD
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
             }`}>
-              <p>Remanente estimado: <b>{auditoriaCompra.remanenteAntes != null ? `${auditoriaCompra.remanenteAntes.toFixed(2)} L` : 'No disponible'}</b></p>
-              <p>Post-abastecimiento: <b>{auditoriaCompra.combustibleEstimadoPost != null ? `${auditoriaCompra.combustibleEstimadoPost.toFixed(2)} L` : 'No disponible'}</b></p>
-              <p>Capacidad tanque: <b>{capacidadTanque != null ? `${capacidadTanque.toFixed(2)} L` : 'No registrada'}</b></p>
+              <p className="font-semibold text-[11px] uppercase tracking-wide opacity-70">
+                {auditoriaCompra.estado === AUDITORIA_ESTADO.EXCESO
+                  ? '⚠ Advertencia — excede capacidad'
+                  : auditoriaCompra.estado === AUDITORIA_ESTADO.SIN_CAPACIDAD
+                    ? 'ℹ Sin capacidad registrada'
+                    : '✓ Carga dentro del rango normal'}
+              </p>
+              <div className="space-y-0.5">
+                <p>
+                  <span className="opacity-70">Combustible en tanque antes de esta carga: </span>
+                  <b>{auditoriaCompra.remanenteAntes != null ? `${auditoriaCompra.remanenteAntes.toFixed(2)} L` : '—'}</b>
+                </p>
+                <p>
+                  <span className="opacity-70">Estimado en tanque al completar la carga: </span>
+                  <b>{auditoriaCompra.combustibleEstimadoPost != null ? `${auditoriaCompra.combustibleEstimadoPost.toFixed(2)} L` : '—'}</b>
+                </p>
+                <p>
+                  <span className="opacity-70">Capacidad máxima del tanque: </span>
+                  <b>{capacidadTanque != null ? `${capacidadTanque.toFixed(2)} L` : 'No registrada'}</b>
+                </p>
+              </div>
+              {auditoriaCompra.estado === AUDITORIA_ESTADO.EXCESO && (
+                <p className="text-[10px] opacity-80 border-t border-red-200 pt-1.5 mt-1">
+                  El total estimado supera la capacidad del tanque. Puede deberse a un registro incorrecto de litros, odómetro o datos históricos. El movimiento se puede guardar igual.
+                </p>
+              )}
             </div>
           )}
 

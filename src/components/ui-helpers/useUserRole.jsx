@@ -51,8 +51,13 @@ export function useUserRole() {
 
     loadUser();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      setLoading(true);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        if (active) { setUser(null); setRole(null); setLoading(false); }
+        return;
+      }
+      // Cualquier otro evento (SIGNED_IN, TOKEN_REFRESHED, INITIAL_SESSION, etc.)
+      // recarga silenciosamente sin mostrar el spinner de carga.
       loadUser();
     });
 
@@ -77,19 +82,20 @@ export function useUserRole() {
     isOperador,
     isAuditor,
     isEconomico,
-    canWrite:            isSuperAdmin || isOperador,
-    canManageCatalogos:  isSuperAdmin || isOperador,
-    canManageFlota:      isSuperAdmin || isOperador,
-    canImport:           isSuperAdmin || isOperador,
-    canViewReportes:     isSuperAdmin || isOperador || isAuditor || isEconomico,
-    canDelete:           isSuperAdmin,
-    canRead:             isSuperAdmin || isOperador || isAuditor || isEconomico,
+    canWrite:               isSuperAdmin || isOperador,
+    canManageCatalogos:     isSuperAdmin || isOperador,
+    canManageFlota:         isSuperAdmin || isOperador,
+    canManageConductores:   isSuperAdmin || isOperador,
+    canImport:              isSuperAdmin || isOperador,
+    canViewReportes:        isSuperAdmin || isOperador || isAuditor || isEconomico,
+    canDelete:              isSuperAdmin,
+    canRead:                isSuperAdmin || isOperador || isAuditor || isEconomico,
     // Finanzas: recargas de tarjetas, precios, saldos
-    canManageFinanzas:   isSuperAdmin || isEconomico,
+    canManageFinanzas:      isSuperAdmin || isEconomico,
     // Movimientos: qué tipos puede registrar cada rol
-    canRecargar:         isSuperAdmin || isEconomico,
-    canComprar:          isSuperAdmin || isOperador,
-    canDespachar:        isSuperAdmin || isOperador,
-    canComprarDespachar: isSuperAdmin || isOperador,
+    canRecargar:            isSuperAdmin || isEconomico,
+    canComprar:             isSuperAdmin || isOperador,
+    canDespachar:           isSuperAdmin || isOperador,
+    canComprarDespachar:    isSuperAdmin || isOperador,
   };
 }

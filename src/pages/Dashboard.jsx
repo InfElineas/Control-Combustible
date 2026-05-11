@@ -160,10 +160,22 @@ export default function Dashboard() {
       const capacidadTotalReserva = [...reservaIdsDelCombustible]
         .map((id) => obtenerCapacidadConsumidor(consumidores.find(c => c.id === id)))
         .reduce((s, v) => s + (Number(v) || 0), 0);
-      const litrosEnTanqueEstimado = Math.max(
-        0,
-        litrosInicialesReserva + comprasReservaHistoricas.reduce((s, m) => s + (m.litros || 0), 0)
-          - despachosReservaHistoricos.reduce((s, m) => s + (m.litros || 0), 0)
+      // Stock físico estimado: calculado por tanque (igual a ConsumidoresPorTipo.stockActual)
+      // para evitar que despachos con combustible_nombre incorrecto/nulo inflen el stock.
+      const reservaTankIdsParaCombustible = new Set([
+        ...comprasReservaHistoricas.map(m => m.consumidor_id).filter(Boolean),
+        ...consumidores
+          .filter(c => consumidoresReservaIds.has(c.id) && obtenerLitrosInicialesConsumidor(c, combustibleIdRef, nombreCombustible) > 0)
+          .map(c => c.id),
+      ]);
+      const litrosEnTanqueEstimado = Math.max(0,
+        [...reservaTankIdsParaCombustible].reduce((total, tankId) => {
+          const tank = consumidores.find(c => c.id === tankId);
+          const ini      = obtenerLitrosInicialesConsumidor(tank, combustibleIdRef, nombreCombustible);
+          const entradas = comprasReservaHistoricas.filter(m => m.consumidor_id === tankId).reduce((s, m) => s + (m.litros || 0), 0);
+          const salidas  = movimientos.filter(m => m.tipo === 'DESPACHO' && m.consumidor_origen_id === tankId).reduce((s, m) => s + (m.litros || 0), 0);
+          return total + ini + entradas - salidas;
+        }, 0)
       );
       const litrosInicioReserva = comprasReservaHistoricas
         .filter(m => mesFiltro !== 'ALL' && m.fecha < `${mesFiltro}-01`)
@@ -262,18 +274,25 @@ export default function Dashboard() {
   // Consumidores activos
   const consumidoresActivos = consumidores.filter(c => c.activo);
 
-  // Alertas de consumo crítico
-  const alertasConsumo = consumidoresActivos.filter(c => {
+  // Alertas de consumo crítico — computed from odo sequence (not stale DB consumo_real field)
+  const alertasConsumo = useMemo(() => consumidoresActivos.filter(c => {
     const consumoRef = c.datos_vehiculo?.indice_consumo_real || c.datos_vehiculo?.indice_consumo_fabricante;
-    const movsConConsumo = movimientos
-      .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.consumo_real != null && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
-      .sort((a, b) => b.odometro - a.odometro);
-    if (!consumoRef || movsConConsumo.length === 0) return false;
-    const consumoUltimo = movsConConsumo[0].consumo_real;
+    if (!consumoRef) return false;
+    const movsConOdo = movimientos
+      .filter(m => (m.tipo === 'COMPRA' || m.tipo === 'DESPACHO') && m.consumidor_id === c.id && m.odometro != null
+        && (mesFiltro === 'ALL' || m.fecha?.startsWith(mesFiltro)))
+      .sort((a, b) => (a.odometro || 0) - (b.odometro || 0));
+    if (movsConOdo.length < 2) return false;
+    const last = movsConOdo[movsConOdo.length - 1];
+    const prev = movsConOdo[movsConOdo.length - 2];
+    const km  = (last.odometro || 0) - (prev.odometro || 0);
+    const lit = last.litros || 0;
+    if (km <= 0 || lit <= 0) return false;
+    const consumoReal = km / lit;
     const umbralCritico = c.datos_vehiculo?.umbral_critico_pct ?? 30;
-    const desviacion = ((consumoRef - consumoUltimo) / consumoRef) * 100;
+    const desviacion = ((consumoRef - consumoReal) / consumoRef) * 100;
     return desviacion >= umbralCritico;
-  });
+  }), [consumidoresActivos, movimientos, mesFiltro]);
 
 
   const movimientosFiltradosOrdenados = useMemo(
@@ -484,6 +503,23 @@ export default function Dashboard() {
                           <span className="text-slate-400 w-20 text-right">{formatMoneySymbol(res.montoCompras, res.moneda)}</span>
                         </div>
                       </button>
+                      {/* Sub-desglose compras: reserva vs directa (solo cuando existen ambos flujos) */}
+                      {(() => {
+                        const directa = res.litrosCompras - res.litrosComprasReservaMes;
+                        if (res.litrosComprasReservaMes > 0 && directa > 0) return (
+                          <div className="bg-slate-50/60 -mx-3 px-5 py-1 border-b border-slate-100 space-y-0.5">
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span>↳ A reserva interna</span>
+                              <span className="tabular-nums">{res.litrosComprasReservaMes.toFixed(1)} L</span>
+                            </div>
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span>↳ Compra directa vehículos</span>
+                              <span className="tabular-nums">{directa.toFixed(1)} L</span>
+                            </div>
+                          </div>
+                        );
+                        return null;
+                      })()}
                       {/* Detalle de compras expandido */}
                       {isComprasExpanded && comprasOrdenadas.length > 0 && (
                         <div className="bg-slate-50/80 -mx-3 px-3 pb-1 border-b border-slate-100">
@@ -561,6 +597,26 @@ export default function Dashboard() {
                           )}
                         </div>
                       </div>
+                      {/* Descomposición del saldo final: reserva + ya en vehículos (suma = saldo final) */}
+                      {res.litrosSaldoFinal > 0 && (res.litrosEnTanqueEstimado > 0 || (res.litrosCompras - res.litrosComprasReservaMes) > 0) && (
+                        <div className="bg-slate-50 -mx-3 px-3 py-1.5 rounded-b-md border border-slate-100 border-t-0 space-y-0.5">
+                          {res.litrosEnTanqueEstimado > 0 && (
+                            <div className="flex justify-between text-[11px] text-slate-500">
+                              <span>🛢 En reserva (tanques)</span>
+                              <div className="text-right">
+                                <span className="tabular-nums font-medium">{res.litrosEnTanqueEstimado.toFixed(1)} L</span>
+                                {res.precioRef > 0 && <span className="text-slate-400 ml-1">≈ {formatMoneySymbol(res.litrosEnTanqueEstimado * res.precioRef, res.moneda)}</span>}
+                              </div>
+                            </div>
+                          )}
+                          {res.litrosSaldoFinal - res.litrosEnTanqueEstimado > 0.05 && (
+                            <div className="flex justify-between text-[11px] text-slate-500">
+                              <span>🚗 Ya en vehículos</span>
+                              <span className="tabular-nums font-medium">{(res.litrosSaldoFinal - res.litrosEnTanqueEstimado).toFixed(1)} L</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex justify-end pt-0.5">
